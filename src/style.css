@@ -124,13 +124,64 @@ button, select, input { font: inherit; color: inherit; }
   cursor: pointer;
   font-size: 16px;
 }
-.tool:hover { background: var(--hover); }
+.tool { display: grid; place-items: center; flex: none; }
+.tool:hover:not(:disabled) { background: var(--hover); }
 .tool.active { color: var(--accent); background: var(--hover); }
+.tool:disabled { opacity: 0.35; cursor: default; }
+.tools { overflow-y: auto; scrollbar-width: none; }
+.tools-sep { height: 1px; background: var(--border); margin: 4px 2px; flex: none; }
+
+.draw-bar {
+  position: absolute;
+  z-index: 7;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
+}
+.draw-bar-label { color: var(--muted); font-size: 12px; white-space: nowrap; padding-right: 4px; }
+.swatch-btn {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--c);
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px var(--panel);
+}
+.swatch-btn.active { border-color: var(--c); }
+.btn.small { height: 26px; padding: 0 8px; font-size: 12px; border: 1px solid var(--border); }
+.btn.danger { color: var(--down); }
+.draw-hint {
+  position: absolute;
+  z-index: 7;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 85%, transparent);
+  color: var(--bg);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chart-wrap.hovering .chart, .chart-wrap.hovering .chart * { cursor: move !important; }
 
 .chart-wrap { position: relative; flex: 1; min-width: 0; }
 .chart { position: absolute; inset: 0; }
 [hidden] { display: none !important; }
-.chart-wrap.drawing .chart { cursor: crosshair; }
+.chart-wrap.drawing .chart, .chart-wrap.drawing .chart * { cursor: crosshair !important; }
 .legend {
   position: absolute;
   z-index: 5;

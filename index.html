@@ -33,14 +33,12 @@
     </header>
 
     <main class="layout">
-      <nav class="tools" aria-label="그리기 도구">
-        <button class="tool active" data-tool="cursor" title="십자선">✛</button>
-        <button class="tool" data-tool="hline" title="수평선 (클릭해서 추가)">―</button>
-        <button class="tool" data-tool="clear" title="그린 선 모두 삭제">🗑</button>
-      </nav>
+      <nav class="tools" aria-label="그리기 도구"></nav>
 
       <section class="chart-wrap">
         <div id="legend" class="legend"></div>
+        <div id="draw-bar" class="draw-bar" hidden></div>
+        <div id="draw-hint" class="draw-hint" hidden></div>
         <div id="chart" class="chart"></div>
         <div id="loading" class="loading" hidden>불러오는 중…</div>
       </section>

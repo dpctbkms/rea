@@ -4,6 +4,7 @@ import {
 } from 'lightweight-charts';
 import { FEEDS, INTERVALS } from './feeds/index.js';
 import { sma, ema, bollinger, rsi, macd, vwap, heikinAshi } from './indicators.js';
+import { DrawingManager, TOOLS, COLORS } from './drawings.js';
 
 const $ = (sel) => document.querySelector(sel);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -18,11 +19,18 @@ const settings = Object.assign(
     chartType: 'candles',
     theme: 'dark',
     indicators: ['volume', 'ema20', 'ema50'],
-    lines: {}, // { ['거래소:코인']: number[] } 수평선 가격
+    drawings: {}, // { ['거래소:코인']: 도형[] }
     keys: {}, // { [피드 id]: API 키 } 이 브라우저에만 저장된다
   },
   load(),
 );
+// 예전 버전의 수평선(lines: 가격 배열)을 도형으로 옮긴다.
+if (settings.lines) {
+  for (const [key, prices] of Object.entries(settings.lines)) {
+    settings.drawings[key] = prices.map((price, i) => ({ id: `line${i}`, type: 'hline', points: [{ time: 0, price }], color: COLORS[0] }));
+  }
+  delete settings.lines;
+}
 // 예전 버전 설정(symbol: 'BTCUSDT') 이어받기.
 if (settings.symbol) {
   settings.coin = settings.symbol.replace(/USDT$/, '');
@@ -63,11 +71,9 @@ const lineKey = () => `${feed.id}:${settings.coin}`;
 let bars = [];
 let mainSeries = null;
 let active = new Map(); // indicator id -> { series: {key: ISeriesApi}, compute(bars) -> {key: data[]} }
-let priceLines = [];
 let unsubscribeBars = () => {};
 let unsubscribeTickers = () => {};
 let loadId = 0;
-let tool = 'cursor';
 
 // ---------- 차트 ----------
 document.documentElement.dataset.theme = settings.theme;
@@ -118,7 +124,7 @@ function createMainSeries() {
       lineColor: css('--accent'), topColor: 'rgba(41, 98, 255, 0.35)', bottomColor: 'rgba(41, 98, 255, 0)', lineWidth: 2,
     });
   }
-  priceLines = [];
+  drawings.attach(mainSeries);
 }
 
 // 차트 종류에 맞게 봉 데이터를 변환.
@@ -132,7 +138,6 @@ function mainData(source) {
 function setMainData() {
   if (bars.length) mainSeries.applyOptions({ priceFormat: priceFormatFor(bars[bars.length - 1].close) });
   mainSeries.setData(mainData(bars));
-  restoreLines();
 }
 
 // ---------- 지표 ----------
@@ -242,6 +247,8 @@ async function loadSymbol() {
   }
   if (id !== loadId) return;
   setMainData();
+  drawings.load(settings.drawings[lineKey()]);
+  renderTools();
   refreshIndicators();
   chart.timeScale().setVisibleLogicalRange({ from: bars.length - 150, to: bars.length + 8 });
   $('#loading').hidden = true;
@@ -269,7 +276,11 @@ const fmt = (v, digits) => v.toLocaleString('en-US', { minimumFractionDigits: di
 const fmtVol = (v) => (v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(2) + 'K' : v.toFixed(0));
 
 let hoverTime = null;
-chart.subscribeCrosshairMove((p) => { hoverTime = p.time ?? null; updateLegend(); });
+chart.subscribeCrosshairMove((p) => {
+  hoverTime = p.time ?? null;
+  updateLegend();
+  drawings.handleMove(p.point);
+});
 
 function updateLegend() {
   if (!bars.length) return;
@@ -301,39 +312,128 @@ function updateLegend() {
   $('#legend').innerHTML = html;
 }
 
-// ---------- 수평선 그리기 ----------
-function restoreLines() {
-  priceLines.forEach((l) => mainSeries.removePriceLine(l));
-  priceLines = (settings.lines[lineKey()] ?? []).map(addPriceLine);
-}
+// ---------- 그리기 도구 ----------
+const ICONS = {
+  cursor: '<path d="M5 3l11 6.5-5 1.2L8.8 16z"/>',
+  trend: '<path d="M4 15L15 4"/><circle cx="4" cy="15" r="1.6"/><circle cx="15" cy="4" r="1.6"/>',
+  ray: '<path d="M4 15L16 3"/><circle cx="4" cy="15" r="1.6"/><path d="M12 3h4v4"/>',
+  hline: '<path d="M2 10h16"/><circle cx="10" cy="10" r="1.6"/>',
+  vline: '<path d="M10 2v16"/><circle cx="10" cy="10" r="1.6"/>',
+  channel: '<path d="M3 13L13 5M7 17L17 9"/>',
+  rect: '<rect x="3.5" y="5.5" width="13" height="9" rx="1"/>',
+  fib: '<path d="M3 4h14M3 8h14M3 11h14M3 16h14"/>',
+  measure: '<path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4"/>',
+  text: '<path d="M4 5V3h12v2M10 3v14M7 17h6"/>',
+  magnet: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3"/>',
+  undo: '<path d="M7 5L3 9l4 4"/><path d="M3 9h9a5 5 0 010 10H9"/>',
+  redo: '<path d="M13 5l4 4-4 4"/><path d="M17 9H8a5 5 0 000 10h3"/>',
+  clear: '<path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/>',
+};
+const icon = (name) => `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+const shortcut = (name) => (navigator.platform.includes('Mac') ? '⌘' : 'Ctrl+') + name;
 
-function addPriceLine(price) {
-  return mainSeries.createPriceLine({ price, color: css('--accent'), lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true });
-}
-
-chart.subscribeClick((p) => {
-  if (tool !== 'hline' || !p.point) return;
-  const price = mainSeries.coordinateToPrice(p.point.y);
-  if (price == null) return;
-  (settings.lines[lineKey()] ??= []).push(price);
-  priceLines.push(addPriceLine(price));
-  save();
-  setTool('cursor');
+const drawings = new DrawingManager({
+  chart,
+  getBars: () => bars,
+  getStep: () => INTERVALS.find((i) => i.id === settings.interval).seconds,
+  formatPrice: (p) => fmt(p, priceFormatFor(bars.length ? bars[bars.length - 1].close : Math.abs(p)).precision),
+  onChange: (list) => {
+    if (list.length) settings.drawings[lineKey()] = list;
+    else delete settings.drawings[lineKey()];
+    save();
+    renderTools();
+  },
+  onSelect: () => renderSelectionBar(),
+  onToolChange: () => renderTools(),
 });
 
-function setTool(next) {
-  if (next === 'clear') {
-    priceLines.forEach((l) => mainSeries.removePriceLine(l));
-    priceLines = [];
-    delete settings.lines[lineKey()];
-    save();
-    next = 'cursor';
+function renderTools() {
+  const tool = drawings.tool;
+  $('.tools').innerHTML = [
+    ...TOOLS.map((t) => `<button class="tool ${t.id === tool ? 'active' : ''}" data-tool="${t.id}" title="${t.label}" aria-label="${t.label}">${icon(t.id)}</button>`),
+    '<div class="tools-sep"></div>',
+    `<button class="tool ${drawings.magnet ? 'active' : ''}" data-action="magnet" title="자석: 점을 가까운 시가·고가·저가·종가에 붙임" aria-label="자석" aria-pressed="${drawings.magnet}">${icon('magnet')}</button>`,
+    `<button class="tool" data-action="undo" title="실행 취소 (${shortcut('Z')})" aria-label="실행 취소" ${drawings.canUndo ? '' : 'disabled'}>${icon('undo')}</button>`,
+    `<button class="tool" data-action="redo" title="다시 실행 (${shortcut('Y')})" aria-label="다시 실행" ${drawings.canRedo ? '' : 'disabled'}>${icon('redo')}</button>`,
+    `<button class="tool" data-action="clear" title="이 종목의 그림 모두 지우기" aria-label="모두 지우기" ${drawings.drawings.length ? '' : 'disabled'}>${icon('clear')}</button>`,
+  ].join('');
+  $('.chart-wrap').classList.toggle('drawing', tool !== 'cursor');
+  const t = TOOLS.find((x) => x.id === tool);
+  $('#draw-hint').hidden = tool === 'cursor';
+  if (tool !== 'cursor') {
+    $('#draw-hint').textContent = `${t.label}: 차트에서 ${t.points === 1 ? '한 곳을' : `${t.points}곳을 차례로`} 누르세요 · Esc로 취소`;
   }
-  tool = next;
-  document.querySelectorAll('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === tool));
-  $('.chart-wrap').classList.toggle('drawing', tool === 'hline');
 }
-document.querySelectorAll('.tool').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+$('.tools').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.tool) return drawings.setTool(btn.dataset.tool);
+  const action = btn.dataset.action;
+  if (action === 'magnet') { drawings.magnet = !drawings.magnet; settings.magnet = drawings.magnet; save(); renderTools(); }
+  if (action === 'undo') drawings.undo();
+  if (action === 'redo') drawings.redo();
+  if (action === 'clear') drawings.clear();
+});
+
+// 선택한 도형의 색 바꾸기·글자 고치기·삭제
+function renderSelectionBar() {
+  const d = drawings.selected;
+  const bar = $('#draw-bar');
+  bar.hidden = !d;
+  if (!d) return;
+  const label = TOOLS.find((t) => t.id === d.type).label;
+  bar.innerHTML = `<span class="draw-bar-label">${label}</span>`
+    + (d.type === 'measure' ? '' : COLORS.map((c) => `<button class="swatch-btn ${c === d.color ? 'active' : ''}" data-color="${c}" style="--c:${c}" title="색 바꾸기" aria-label="색 ${c}"></button>`).join(''))
+    + (d.type === 'text' ? '<button class="btn small" data-action="edit">글자 수정</button>' : '')
+    + '<button class="btn small danger" data-action="delete" title="삭제 (Delete)">삭제</button>';
+}
+
+$('#draw-bar').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  if (btn.dataset.color) drawings.updateSelected({ color: btn.dataset.color });
+  if (btn.dataset.action === 'delete') drawings.removeSelected();
+  if (btn.dataset.action === 'edit') {
+    const text = window.prompt('텍스트를 입력하세요', drawings.selected.text);
+    if (text?.trim()) drawings.updateSelected({ text: text.trim() });
+  }
+});
+
+
+// 도형을 잡고 끌면 차트 대신 도형이 움직이도록, 차트보다 먼저(캡처 단계에서) 이벤트를 가로챈다.
+const chartEl = $('#chart');
+const localPoint = (e) => {
+  const r = chartEl.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+};
+let pressedAt = null;
+chartEl.addEventListener('pointerdown', (e) => {
+  pressedAt = localPoint(e);
+  if (e.button !== 0 || !drawings.beginDrag(pressedAt, e.pointerType === 'touch')) return;
+  e.stopPropagation();
+  e.preventDefault();
+}, { capture: true });
+for (const type of ['mousedown', 'touchstart']) {
+  chartEl.addEventListener(type, (e) => { if (drawings.drag) e.stopPropagation(); }, { capture: true });
+}
+window.addEventListener('pointermove', (e) => {
+  if (drawings.drag) return drawings.dragTo(localPoint(e));
+  if (drawings.tool === 'cursor' && e.target.closest?.('#chart')) {
+    $('.chart-wrap').classList.toggle('hovering', !!drawings.hitTest(localPoint(e), e.pointerType === 'touch' ? 14 : 7));
+  }
+});
+window.addEventListener('pointerup', () => drawings.endDrag());
+
+// 차트 라이브러리의 클릭 알림은 0.5초 안에 다른 곳을 누르면 빠뜨리므로, 클릭을 직접 받는다.
+// 끌어서 차트를 옮긴 경우와 가격·시간 눈금 위를 누른 경우는 제외한다.
+chartEl.addEventListener('click', (e) => {
+  const pt = localPoint(e);
+  if (!pressedAt || Math.hypot(pt.x - pressedAt.x, pt.y - pressedAt.y) > 5) return;
+  if (pt.x > chart.timeScale().width() || pt.y > chart.panes()[0].getHeight()) return;
+  drawings.handleClick(pt);
+});
+window.addEventListener('pointercancel', () => drawings.endDrag());
 
 // ---------- 툴바 ----------
 function renderIntervals() {
@@ -465,10 +565,15 @@ dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(
 
 // 트레이딩뷰처럼 차트에서 바로 글자를 입력하면 검색창이 열린다.
 document.addEventListener('keydown', (e) => {
-  if (dialog.open || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.target.matches('input, select')) return;
+  if (dialog.open || keyDialog.open || e.target.matches('input, select, textarea')) return;
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
+  if (mod && k === 'z') { e.preventDefault(); return e.shiftKey ? drawings.redo() : drawings.undo(); }
+  if (mod && k === 'y') { e.preventDefault(); return drawings.redo(); }
+  if (mod || e.altKey) return;
+  if (e.key === 'Escape') { drawings.setTool('cursor'); drawings.select(null); return; }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && drawings.selected) { e.preventDefault(); return drawings.removeSelected(); }
   if (/^[a-zA-Z]$/.test(e.key)) { e.preventDefault(); openSearch(e.key.toUpperCase()); }
-  if (e.key === 'Escape') setTool('cursor');
 });
 
 // ---------- 관심 목록 ----------
@@ -579,6 +684,8 @@ setInterval(() => {
 // ---------- 시작 ----------
 renderIntervals();
 renderIndicatorMenu();
+drawings.magnet = !!settings.magnet;
+renderTools();
 createMainSeries();
 buildIndicators();
 startTickers();
