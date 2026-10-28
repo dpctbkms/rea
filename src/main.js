@@ -45,7 +45,7 @@ const INDICATORS = [
 
 // ---------- 상태 ----------
 const params = new URLSearchParams(location.search);
-let feed = params.get('feed') === 'demo' ? new DemoFeed() : new BinanceFeed();
+let feed = params.get('feed') === 'demo' || window.REA_FEED === 'demo' ? new DemoFeed() : new BinanceFeed();
 let bars = [];
 let mainSeries = null;
 let active = new Map(); // indicator id -> { series: {key: ISeriesApi}, compute(bars) -> {key: data[]} }
@@ -363,7 +363,7 @@ $('#theme-btn').addEventListener('click', () => {
   buildIndicators();
 });
 
-$('#screenshot-btn').addEventListener('click', () => {
+$('#screenshot-btn')?.addEventListener('click', () => {
   chart.takeScreenshot().toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -457,7 +457,9 @@ function startTickers() {
 
 // ---------- 상태 표시줄 ----------
 function updateStatus() {
-  $('#feed-status').textContent = feed instanceof DemoFeed
+  $('#feed-status').textContent = window.REA_FEED === 'demo'
+    ? '데모 데이터 (웹 공유 버전은 외부 시세에 접속할 수 없음)'
+    : feed instanceof DemoFeed
     ? '데모 데이터 (실시간 피드에 연결할 수 없음)'
     : '실시간 · Binance';
 }

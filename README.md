@@ -28,6 +28,8 @@ npm run build      # dist/ 에 정적 파일 생성
 npm test           # 지표 계산 단위 테스트
 ```
 
+`npm run build:artifact`는 앱을 웹 페이지 한 장(`dist-artifact/rea-chart.html`)으로 묶습니다. 이 버전은 데모 시세를 쓰고 스크린샷 버튼이 없습니다.
+
 `?feed=demo`를 URL에 붙이면 네트워크 없이 데모 데이터로 실행합니다.
 
 ## 구조
