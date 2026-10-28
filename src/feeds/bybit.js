@@ -1,4 +1,4 @@
-import { fetchJson, socket } from './common.js';
+import { cached, coinName, fetchJson, POPULAR, socket, sortMarkets } from './common.js';
 
 const REST = 'https://api.bybit.com/v5/market';
 const WS = 'wss://stream.bybit.com/v5/public/spot';
@@ -11,8 +11,14 @@ export const bybit = {
   id: 'bybit',
   name: '바이비트',
   quote: 'USDT',
-  coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'BNB'],
+  coins: POPULAR,
   market: (coin) => `${coin}USDT`,
+  loadMarkets: cached(async () => {
+    const json = await fetchJson(`${REST}/instruments-info?category=spot&limit=1000`);
+    return sortMarkets(json.result.list
+      .filter((m) => m.quoteCoin === 'USDT' && m.status === 'Trading')
+      .map((m) => ({ id: m.baseCoin, name: coinName(m.baseCoin) })));
+  }),
   probeUrl: `${REST}/kline?category=spot&symbol=BTCUSDT&interval=60&limit=1`,
 
   async getBars(coin, interval) {

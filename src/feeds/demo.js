@@ -1,4 +1,4 @@
-import { ALL_COINS, bucketStart, intervalSeconds } from './common.js';
+import { ALL_COINS, COINS, bucketStart, intervalSeconds } from './common.js';
 
 // 네트워크 없이 동작하는 결정적 랜덤워크 피드.
 const BASE = { BTC: 67000, ETH: 3400, XRP: 0.55, SOL: 150, DOGE: 0.13, ADA: 0.45, AVAX: 30, LINK: 14, DOT: 6.5, BNB: 580 };
@@ -9,6 +9,7 @@ export class DemoFeed {
   quote = 'USDT';
   coins = ALL_COINS;
   market = (coin) => `${coin}USDT`;
+  loadMarkets = async () => COINS;
   #last = new Map();
 
   async getBars(coin, interval, limit = 1000) {

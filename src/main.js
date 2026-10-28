@@ -2,7 +2,7 @@ import {
   createChart, CandlestickSeries, BarSeries, LineSeries, AreaSeries, HistogramSeries,
   CrosshairMode, ColorType, LineStyle,
 } from 'lightweight-charts';
-import { FEEDS, INTERVALS, COINS } from './feeds/index.js';
+import { FEEDS, INTERVALS } from './feeds/index.js';
 import { sma, ema, bollinger, rsi, macd, vwap, heikinAshi } from './indicators.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -19,6 +19,7 @@ const settings = Object.assign(
     theme: 'dark',
     indicators: ['volume', 'ema20', 'ema50'],
     lines: {}, // { ['거래소:코인']: number[] } 수평선 가격
+    keys: {}, // { [피드 id]: API 키 } 이 브라우저에만 저장된다
   },
   load(),
 );
@@ -55,8 +56,9 @@ const forceDemo = params.get('feed') === 'demo' || window.REA_FEED === 'demo';
 const feedById = (id) => FEEDS.find((f) => f.id === id) ?? FEEDS[0];
 let feed = feedById(forceDemo ? 'demo' : settings.source);
 let feedError = null; // 선택한 거래소에 연결하지 못한 이유
-if (!feed.coins.includes(settings.coin)) settings.coin = feed.coins[0];
-const marketLabel = () => `${settings.coin}/${feed.quote}`;
+let markets = null; // 현재 피드의 상장 종목 전체 [{id, name}]
+for (const f of FEEDS) if (f.needsKey) f.apiKey = settings.keys[f.id] ?? '';
+const marketLabel = () => (feed.quote ? `${settings.coin}/${feed.quote}` : settings.coin);
 const lineKey = () => `${feed.id}:${settings.coin}`;
 let bars = [];
 let mainSeries = null;
@@ -95,7 +97,7 @@ function applyTheme() {
 function priceFormatFor(price) {
   const precision = feed.quote === 'KRW'
     ? (price >= 100 ? 0 : price >= 1 ? 2 : 4)
-    : (price >= 1000 ? 2 : price >= 1 ? 3 : price >= 0.01 ? 5 : 8);
+    : (price >= 1000 ? 2 : price >= 10 ? 3 : price >= 1 ? 4 : price >= 0.01 ? 5 : 8);
   return { type: 'price', precision, minMove: 1 / 10 ** precision };
 }
 
@@ -213,6 +215,10 @@ async function loadSymbol() {
   const id = ++loadId;
   unsubscribeBars();
   $('#loading').hidden = false;
+  await loadMarkets();
+  if (id !== loadId) return;
+  const custom = feed.allowCustom && settings.customFor === feed.id;
+  if (markets && !custom && !markets.some((m) => m.id === settings.coin)) settings.coin = feed.coins[0];
   $('#symbol-label').textContent = marketLabel();
   document.title = `${marketLabel()} · Rea Chart`;
   try {
@@ -223,8 +229,13 @@ async function loadSymbol() {
     if (id !== loadId) return;
     if (feed.id === 'demo') throw err;
     console.warn(`${feed.name} 연결 실패, 데모 데이터로 전환합니다.`, err);
-    feedError = `${feed.name}에 연결하지 못했습니다`;
+    feedError = err.code === 'NO_KEY' ? `${feed.name}: API 키를 넣어 주세요`
+      : err.code === 'BAD_KEY' ? `${feed.name}: API 키가 맞지 않습니다`
+      : `${feed.name}에 연결하지 못했습니다`;
+    if (err.code === 'NO_KEY' || err.code === 'BAD_KEY') openKeyDialog();
     feed = feedById('demo');
+    markets = null;
+    loadMarkets();
     $('#symbol-label').textContent = marketLabel();
     startTickers();
     bars = await feed.getBars(settings.coin, settings.interval);
@@ -403,23 +414,35 @@ function openSearch(initial = '') {
   $('#search-input').focus();
 }
 
+const SEARCH_LIMIT = 100;
+
 function searchMatches() {
-  const q = $('#search-input').value.trim().toUpperCase();
-  return COINS.filter((c) => feed.coins.includes(c.id)
-    && (c.id.includes(q) || c.name.includes(q) || feed.market(c.id).includes(q)));
+  const raw = $('#search-input').value.trim();
+  const q = raw.toUpperCase();
+  const list = (markets ?? feed.coins.map((id) => ({ id, name: '' })))
+    .filter((m) => m.id.includes(q) || m.name.includes(raw) || feed.market(m.id).toUpperCase().includes(q))
+    .slice(0, SEARCH_LIMIT);
+  // 목록에 없는 종목 코드도 직접 열 수 있는 피드 (주식 등)
+  if (feed.allowCustom && q && !list.some((m) => m.id === q)) list.push({ id: q, name: '직접 입력' });
+  return list;
 }
 
 function renderSearch() {
   const list = searchMatches();
   searchIndex = Math.min(searchIndex, Math.max(list.length - 1, 0));
   $('#search-results').innerHTML = list.map((c, i) =>
-    `<li data-coin="${c.id}" class="${i === searchIndex ? 'selected' : ''}"><span>${feed.market(c.id)}</span><span>${c.name} · ${feed.name}</span></li>`).join('');
+    `<li data-coin="${c.id}" class="${i === searchIndex ? 'selected' : ''}"><span>${feed.market(c.id)}</span><span>${c.name || c.id}</span></li>`).join('')
+    || '<li class="empty">검색 결과가 없습니다</li>';
+  $('#search-count').textContent = markets ? `${feed.name} · 전체 ${markets.length.toLocaleString()}개 종목` : `${feed.name} · 종목 목록 불러오는 중…`;
 }
 
 function selectCoin(coin) {
   dialog.close();
   if (coin === settings.coin) return;
   settings.coin = coin;
+  // 목록에 없는 종목을 직접 고른 경우, 이 피드에서는 그대로 둔다.
+  if (feed.allowCustom && !markets?.some((m) => m.id === coin)) settings.customFor = feed.id;
+  else delete settings.customFor;
   save();
   renderWatchlist();
   loadSymbol();
@@ -431,11 +454,12 @@ $('#search-input').addEventListener('keydown', (e) => {
   const list = searchMatches();
   if (e.key === 'ArrowDown') { searchIndex = Math.min(searchIndex + 1, list.length - 1); renderSearch(); e.preventDefault(); }
   if (e.key === 'ArrowUp') { searchIndex = Math.max(searchIndex - 1, 0); renderSearch(); e.preventDefault(); }
-  if (e.key === 'Enter' && list[searchIndex]) selectCoin(list[searchIndex].id);
+  // 기본 동작을 막지 않으면, 창이 닫힌 뒤 포커스가 돌아간 검색 버튼이 같은 Enter로 다시 눌린다.
+  if (e.key === 'Enter' && list[searchIndex]) { e.preventDefault(); selectCoin(list[searchIndex].id); }
 });
 $('#search-results').addEventListener('click', (e) => {
   const li = e.target.closest('li');
-  if (li) selectCoin(li.dataset.coin);
+  if (li?.dataset.coin) selectCoin(li.dataset.coin);
 });
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
@@ -452,7 +476,8 @@ const tickers = new Map();
 
 function renderWatchlist() {
   $('#watch-title').textContent = `관심 목록 · ${feed.name}`;
-  $('#watch-list').innerHTML = feed.coins.map((coin) => {
+  const listed = markets && new Set(markets.map((m) => m.id));
+  $('#watch-list').innerHTML = feed.coins.filter((c) => !listed || listed.has(c)).map((coin) => {
     const t = tickers.get(coin);
     const cls = t ? (t.changePct >= 0 ? 'up' : 'down') : '';
     return `<li data-coin="${coin}" class="${coin === settings.coin ? 'active' : ''}">
@@ -486,22 +511,67 @@ function updateStatus() {
     ? `${feedError}. 데모 데이터로 표시 중`
     : feed.id === 'demo'
     ? '데모 데이터'
-    : `실시간 · ${feed.name} (${feed.quote})`;
+    : `실시간 · ${feed.name}${feed.quote ? ` (${feed.quote})` : ''}`;
 }
 
+// ---------- 종목 목록 ----------
+async function loadMarkets() {
+  const current = feed;
+  try {
+    const list = await current.loadMarkets();
+    if (current !== feed) return;
+    markets = list;
+  } catch (err) {
+    console.warn(`${current.name} 종목 목록을 불러오지 못했습니다.`, err);
+    if (current === feed) markets = null;
+  }
+  renderWatchlist();
+  if (dialog.open) renderSearch();
+}
+
+// ---------- API 키 ----------
+const keyDialog = $('#key-dialog');
+const keyFeed = () => feedById(settings.source);
+
+function openKeyDialog() {
+  const f = keyFeed();
+  if (!f.needsKey || keyDialog.open) return;
+  $('#key-feed').textContent = f.name;
+  $('#key-input').value = settings.keys[f.id] ?? '';
+  keyDialog.showModal();
+}
+
+$('#key-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const f = keyFeed();
+  const key = $('#key-input').value.trim();
+  settings.keys[f.id] = key;
+  f.apiKey = key;
+  save();
+  keyDialog.close();
+  switchFeed(f.id);
+});
+$('#key-cancel').addEventListener('click', () => keyDialog.close());
+$('#key-btn').addEventListener('click', openKeyDialog);
+
 // ---------- 거래소 선택 ----------
-$('#source').innerHTML = FEEDS.map((f) => `<option value="${f.id}">${f.name}</option>`).join('');
-$('#source').value = feed.id;
-$('#source').hidden = forceDemo;
-$('#source').addEventListener('change', (e) => {
-  settings.source = e.target.value;
-  feed = feedById(settings.source);
+function switchFeed(id) {
+  settings.source = id;
+  feed = feedById(id);
   feedError = null;
-  if (!feed.coins.includes(settings.coin)) settings.coin = feed.coins[0];
+  markets = null;
+  delete settings.customFor;
+  $('#key-btn').hidden = !feed.needsKey;
   save();
   startTickers();
   loadSymbol();
-});
+}
+
+$('#source').innerHTML = FEEDS.map((f) => `<option value="${f.id}">${f.name}</option>`).join('');
+$('#source').value = feed.id;
+$('#source').hidden = forceDemo;
+$('#key-btn').hidden = forceDemo || !feed.needsKey;
+$('#source').addEventListener('change', (e) => switchFeed(e.target.value));
 setInterval(() => {
   $('#clock').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false }) + ' (로컬)';
 }, 1000);

@@ -1,4 +1,4 @@
-import { fetchJson, normalizeBars, socket, tradeBarBuilder, intervalSeconds } from './common.js';
+import { cached, fetchJson, intervalSeconds, normalizeBars, socket, sortMarkets, tradeBarBuilder } from './common.js';
 
 // 업비트와 빗썸은 같은 형식의 API를 제공한다.
 // 캔들 스트림 대신 체결(trade) 스트림으로 현재 봉을 만든다.
@@ -23,6 +23,12 @@ function upbitStyleFeed({ id, name, rest, ws, coins, pageCursor }) {
     quote: 'KRW',
     coins,
     market: (coin) => `KRW-${coin}`,
+    loadMarkets: cached(async () => {
+      const rows = await fetchJson(`${rest}/market/all`);
+      return sortMarkets(rows
+        .filter((m) => m.market.startsWith('KRW-'))
+        .map((m) => ({ id: m.market.slice(4), name: m.korean_name })));
+    }),
     probeUrl: `${rest}/candles/minutes/60?market=KRW-BTC&count=1`,
 
     async getBars(coin, interval) {

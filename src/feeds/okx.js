@@ -1,4 +1,4 @@
-import { fetchJson, normalizeBars, socket } from './common.js';
+import { cached, coinName, fetchJson, normalizeBars, POPULAR, socket, sortMarkets } from './common.js';
 
 const REST = 'https://www.okx.com/api/v5/market';
 const WS_PUBLIC = 'wss://ws.okx.com:8443/ws/v5/public';
@@ -15,8 +15,14 @@ export const okx = {
   id: 'okx',
   name: 'OKX',
   quote: 'USDT',
-  coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'BNB'],
+  coins: POPULAR,
   market: (coin) => `${coin}-USDT`,
+  loadMarkets: cached(async () => {
+    const json = await fetchJson('https://www.okx.com/api/v5/public/instruments?instType=SPOT');
+    return sortMarkets(json.data
+      .filter((m) => m.quoteCcy === 'USDT' && m.state === 'live')
+      .map((m) => ({ id: m.baseCcy, name: coinName(m.baseCcy) })));
+  }),
   probeUrl: `${REST}/candles?instId=BTC-USDT&bar=1H&limit=1`,
 
   async getBars(coin, interval) {

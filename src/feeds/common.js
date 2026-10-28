@@ -2,7 +2,8 @@
 //
 // 피드 인터페이스:
 //   id, name, quote               식별자, 표시 이름, 호가 통화(USDT, KRW, USD)
-//   coins                         지원하는 코인 목록(COINS의 id)
+//   coins                         기본 관심 목록
+//   loadMarkets()                 -> Promise<{id, name}[]>  상장 종목 전체 (검색용)
 //   market(coin)                  거래소 마켓 코드 (예: BTCUSDT, KRW-BTC)
 //   getBars(coin, interval)       -> Promise<bar[]>  (time은 UTC 초, 오래된 순)
 //   subscribeBars(coin, interval, onBar)   -> unsubscribe()
@@ -32,6 +33,22 @@ export const COINS = [
 ];
 
 export const ALL_COINS = COINS.map((c) => c.id);
+export const POPULAR = ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'BNB'];
+
+const KOREAN_NAMES = Object.fromEntries(COINS.map((c) => [c.id, c.name]));
+export const coinName = (id) => KOREAN_NAMES[id] ?? '';
+
+// 종목 목록을 한 번만 불러오도록 감싼다. 실패하면 다음 호출 때 다시 시도.
+export function cached(load) {
+  let promise;
+  return () => (promise ??= load().catch((err) => { promise = null; throw err; }));
+}
+
+// 정렬: 인기 코인 먼저, 나머지는 알파벳 순.
+export function sortMarkets(list) {
+  const rank = (id) => { const i = POPULAR.indexOf(id); return i < 0 ? 999 : i; };
+  return list.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+}
 
 export const intervalSeconds = (id) => INTERVALS.find((i) => i.id === id).seconds;
 
@@ -103,14 +120,21 @@ export function tradeBarBuilder(step, lastBar, onBar) {
 }
 
 // 자동 재연결과 핑을 갖춘 웹소켓.
+//   url              주소, 또는 주소를 돌려주는 (비동기) 함수 — 접속 토큰이 필요한 거래소용.
 //   onOpen(ws)       연결될 때마다 구독 메시지를 보낸다.
 //   onMessage(msg)   JSON으로 파싱된 메시지 (파싱 안 되는 pong 등은 무시).
 //   ping             { every: ms, message: string } 연결 유지용.
 export function socket(url, { onOpen, onMessage, ping }) {
   let ws, closed = false, retry = 0, retryTimer, pingTimer;
   const decoder = new TextDecoder();
-  const open = () => {
-    ws = new WebSocket(url);
+  const retryLater = () => {
+    if (!closed) retryTimer = setTimeout(open, Math.min(30000, 1000 * 2 ** retry++));
+  };
+  const open = async () => {
+    let target;
+    try { target = typeof url === 'function' ? await url() : url; } catch { return retryLater(); }
+    if (closed) return;
+    ws = new WebSocket(target);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       retry = 0;
@@ -125,8 +149,7 @@ export function socket(url, { onOpen, onMessage, ping }) {
     };
     ws.onclose = () => {
       clearInterval(pingTimer);
-      if (closed) return;
-      retryTimer = setTimeout(open, Math.min(30000, 1000 * 2 ** retry++));
+      retryLater();
     };
     ws.onerror = () => {};
   };
@@ -135,6 +158,16 @@ export function socket(url, { onOpen, onMessage, ping }) {
     closed = true;
     clearTimeout(retryTimer);
     clearInterval(pingTimer);
-    ws.close();
+    ws?.close();
   };
+}
+
+// 웹소켓이 없는 시세용 주기적 조회. 실패는 다음 주기에 다시 시도한다.
+// immediate가 false면 첫 조회도 한 주기 뒤에 한다(방금 받은 데이터를 또 받지 않도록).
+export function poll(every, fn, immediate = true) {
+  let stopped = false;
+  const tick = async () => { try { await fn(); } catch { /* 다음 주기에 재시도 */ } };
+  if (immediate) tick();
+  const id = setInterval(() => !stopped && tick(), every);
+  return () => { stopped = true; clearInterval(id); };
 }

@@ -1,4 +1,4 @@
-import { fetchJson, socket } from './common.js';
+import { cached, coinName, fetchJson, POPULAR, socket, sortMarkets } from './common.js';
 
 // api.binance.com이 막힌 지역에서는 시세 전용 미러(binance.vision)로 넘어간다.
 const REST = ['https://api.binance.com/api/v3', 'https://data-api.binance.vision/api/v3'];
@@ -8,8 +8,15 @@ export const binance = {
   id: 'binance',
   name: '바이낸스',
   quote: 'USDT',
-  coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'BNB'],
+  coins: POPULAR,
   market: (coin) => `${coin}USDT`,
+  loadMarkets: cached(async () => {
+    const rows = await fetchJson(REST.map((r) => `${r}/ticker/price`));
+    return sortMarkets(rows.filter((r) => r.symbol.endsWith('USDT')).map((r) => {
+      const id = r.symbol.slice(0, -4);
+      return { id, name: coinName(id) };
+    }));
+  }),
   probeUrl: `${REST[1]}/klines?symbol=BTCUSDT&interval=1h&limit=1`,
 
   async getBars(coin, interval) {

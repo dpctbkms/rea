@@ -1,4 +1,4 @@
-import { aggregateBars, fetchJson, intervalSeconds, normalizeBars, socket, tradeBarBuilder } from './common.js';
+import { aggregateBars, cached, coinName, fetchJson, intervalSeconds, normalizeBars, socket, sortMarkets, tradeBarBuilder } from './common.js';
 
 const REST = 'https://api.exchange.coinbase.com';
 const WS = 'wss://ws-feed.exchange.coinbase.com';
@@ -15,6 +15,12 @@ export const coinbase = {
   quote: 'USD',
   coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT'],
   market: (coin) => `${coin}-USD`,
+  loadMarkets: cached(async () => {
+    const rows = await fetchJson(`${REST}/products`);
+    return sortMarkets(rows
+      .filter((m) => m.quote_currency === 'USD' && m.status === 'online' && !m.trading_disabled)
+      .map((m) => ({ id: m.base_currency, name: coinName(m.base_currency) })));
+  }),
   probeUrl: `${REST}/products/BTC-USD/candles?granularity=3600`,
 
   async getBars(coin, interval) {
