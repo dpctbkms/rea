@@ -3,7 +3,8 @@ import {
   CrosshairMode, ColorType, LineStyle,
 } from 'lightweight-charts';
 import { FEEDS, INTERVALS } from './feeds/index.js';
-import { sma, ema, bollinger, rsi, macd, vwap, heikinAshi } from './indicators.js';
+import { heikinAshi } from './indicators.js';
+import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
 import { DrawingManager, TOOLS, COLORS } from './drawings.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -18,7 +19,7 @@ const settings = Object.assign(
     interval: '1h',
     chartType: 'candles',
     theme: 'dark',
-    indicators: ['volume', 'ema20', 'ema50'],
+    indicators: null, // 지표 목록 (studies.js 형식)
     drawings: {}, // { ['거래소:코인']: 도형[] }
     keys: {}, // { [피드 id]: API 키 } 이 브라우저에만 저장된다
   },
@@ -31,6 +32,7 @@ if (settings.lines) {
   }
   delete settings.lines;
 }
+settings.indicators = migrateStudies(settings.indicators) ?? DEFAULT_STUDIES();
 // 예전 버전 설정(symbol: 'BTCUSDT') 이어받기.
 if (settings.symbol) {
   settings.coin = settings.symbol.replace(/USDT$/, '');
@@ -44,20 +46,6 @@ function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch { /* 저장 불가 환경 */ }
 }
 
-// ---------- 지표 정의 ----------
-// pane: 0이면 가격 차트 위에 겹쳐 그림, 'sub'이면 아래 별도 창.
-const INDICATORS = [
-  { id: 'volume', label: '거래량', color: '#787b86', pane: 0 },
-  { id: 'sma20', label: 'SMA 20', color: '#f7a21b', pane: 0, line: (b) => sma(b, 20) },
-  { id: 'ema20', label: 'EMA 20', color: '#2962ff', pane: 0, line: (b) => ema(b, 20) },
-  { id: 'ema50', label: 'EMA 50', color: '#ff6d00', pane: 0, line: (b) => ema(b, 50) },
-  { id: 'ema200', label: 'EMA 200', color: '#e91e63', pane: 0, line: (b) => ema(b, 200) },
-  { id: 'bb', label: '볼린저 밴드 20, 2', color: '#2196f3', pane: 0 },
-  { id: 'vwap', label: 'VWAP', color: '#9c27b0', pane: 0, line: vwap },
-  { id: 'rsi', label: 'RSI 14', color: '#7e57c2', pane: 'sub' },
-  { id: 'macd', label: 'MACD 12, 26, 9', color: '#2962ff', pane: 'sub' },
-];
-
 // ---------- 상태 ----------
 const params = new URLSearchParams(location.search);
 const forceDemo = params.get('feed') === 'demo' || window.REA_FEED === 'demo';
@@ -70,7 +58,7 @@ const marketLabel = () => (feed.quote ? `${settings.coin}/${feed.quote}` : setti
 const lineKey = () => `${feed.id}:${settings.coin}`;
 let bars = [];
 let mainSeries = null;
-let active = new Map(); // indicator id -> { series: {key: ISeriesApi}, compute(bars) -> {key: data[]} }
+let active = new Map(); // 지표 id -> { study, def, series: {plot key: 시리즈}, values: {plot key: Map(time -> 값)} }
 let unsubscribeBars = () => {};
 let unsubscribeTickers = () => {};
 let loadId = 0;
@@ -141,76 +129,70 @@ function setMainData() {
 }
 
 // ---------- 지표 ----------
+const PANE_HEIGHT = 120;
+const stepSeconds = () => INTERVALS.find((i) => i.id === settings.interval).seconds;
+
 function buildIndicators() {
-  for (const { series } of active.values()) Object.values(series).forEach((s) => chart.removeSeries(s));
+  for (const { series } of active.values()) Object.values(series).forEach((sr) => chart.removeSeries(sr));
   active = new Map();
   let subPane = 0;
-  for (const def of INDICATORS) {
-    if (!settings.indicators.includes(def.id)) continue;
-    const pane = def.pane === 'sub' ? ++subPane : 0;
-    active.set(def.id, createIndicator(def, pane));
+  for (const study of settings.indicators) {
+    const def = studyDef(study.type);
+    // 숨긴 지표는 시리즈를 만들지 않는다 (빈 아래 창이 남지 않도록).
+    const series = study.hidden ? {} : createStudySeries(study, def, def.pane === 'sub' ? ++subPane : 0);
+    active.set(study.id, { study, def, series, values: {} });
   }
-  // 하단 지표 창 높이를 일정하게 맞춘다.
-  chart.panes().forEach((p, i) => { if (i > 0) p.setHeight(120); });
+  chart.panes().forEach((pane, i) => { if (i > 0) pane.setHeight(PANE_HEIGHT); });
   refreshIndicators();
+  renderLegend();
 }
 
-function createIndicator(def, pane) {
-  const line = (color, extra = {}) => chart.addSeries(LineSeries, {
-    color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, ...extra,
-  }, pane);
+function createStudySeries(study, def, pane) {
+  const series = {};
+  for (const plot of def.plots) {
+    const color = study.colors[plot.key];
+    const common = { priceLineVisible: false, crosshairMarkerVisible: false, ...(def.format === 'volume' ? { priceFormat: { type: 'volume' } } : {}) };
+    if (plot.kind === 'color') continue;
+    if (plot.kind === 'histogram') {
+      series[plot.key] = chart.addSeries(HistogramSeries, { ...common, color, lastValueVisible: false, ...(plot.scale ? { priceScaleId: plot.scale } : {}) }, pane);
+    } else if (plot.kind === 'dots') {
+      series[plot.key] = chart.addSeries(LineSeries, { ...common, color, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 1.5, lastValueVisible: false }, pane);
+    } else {
+      series[plot.key] = chart.addSeries(LineSeries, { ...common, color, lineWidth: plot.width ?? 2, lastValueVisible: !plot.scale, ...(plot.scale ? { priceScaleId: plot.scale } : {}) }, pane);
+    }
+    if (plot.scale === 'volume') series[plot.key].priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    if (def.range) series[plot.key].applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: def.range[0], maxValue: def.range[1] } }) });
+  }
+  const first = Object.values(series)[0];
+  for (const level of def.levels ?? []) {
+    first?.createPriceLine({ price: +study.params[level.key], color: css('--muted'), lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
+  }
+  return series;
+}
 
-  switch (def.id) {
-    case 'volume': {
-      const s = chart.addSeries(HistogramSeries, {
-        priceFormat: { type: 'volume' }, priceScaleId: 'volume', lastValueVisible: false, priceLineVisible: false,
-      }, pane);
-      s.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-      const up = css('--up') + '80', down = css('--down') + '80';
-      return {
-        series: { volume: s },
-        compute: (b) => ({ volume: b.map((x) => ({ time: x.time, value: x.volume, color: x.close >= x.open ? up : down })) }),
-      };
-    }
-    case 'bb': {
-      const opts = { lineWidth: 1 };
-      return {
-        series: { upper: line(def.color, opts), middle: line('#ff9800', opts), lower: line(def.color, opts) },
-        compute: (b) => bollinger(b, 20, 2),
-      };
-    }
-    case 'rsi': {
-      const s = line(def.color, { lineWidth: 2 });
-      s.createPriceLine({ price: 70, color: css('--muted'), lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
-      s.createPriceLine({ price: 30, color: css('--muted'), lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
-      s.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
-      return { series: { rsi: s }, compute: (b) => ({ rsi: rsi(b, 14) }) };
-    }
-    case 'macd': {
-      const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, pane);
-      const up = css('--up'), down = css('--down');
-      return {
-        series: { histogram: hist, macd: line('#2962ff', { lineWidth: 2 }), signal: line('#ff6d00', { lineWidth: 2 }) },
-        compute: (b) => {
-          const m = macd(b);
-          m.histogram = m.histogram.map((p) => ({ ...p, color: p.value >= 0 ? up + 'a0' : down + 'a0' }));
-          return m;
-        },
-      };
-    }
-    default:
-      return { series: { value: line(def.color, { lineWidth: 2 }) }, compute: (b) => ({ value: def.line(b) }) };
+function computeStudy({ study, def }) {
+  try {
+    return def.compute(bars, study.params, { step: stepSeconds(), colors: study.colors });
+  } catch (err) {
+    console.warn(`${studyTitle(study)} 계산 실패`, err);
+    return {};
   }
 }
 
 function refreshIndicators(liveOnly = false) {
-  for (const ind of active.values()) {
-    const data = ind.compute(bars);
-    for (const [key, s] of Object.entries(ind.series)) {
-      const d = data[key];
-      if (!d?.length) { if (!liveOnly) s.setData([]); continue; }
-      if (liveOnly) s.update(d[d.length - 1]);
-      else s.setData(d);
+  for (const inst of active.values()) {
+    if (!Object.keys(inst.series).length) continue;
+    const data = computeStudy(inst);
+    for (const [key, sr] of Object.entries(inst.series)) {
+      const d = data[key] ?? [];
+      if (liveOnly && d.length) {
+        const last = d[d.length - 1];
+        sr.update(last);
+        inst.values[key]?.set(last.time, last.value);
+      } else {
+        sr.setData(d);
+        inst.values[key] = new Map(d.filter((x) => 'value' in x).map((x) => [x.time, x.value]));
+      }
     }
   }
 }
@@ -282,6 +264,33 @@ chart.subscribeCrosshairMove((p) => {
   drawings.handleMove(p.point);
 });
 
+const LEGEND_ICONS = {
+  eye: '<path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z"/><circle cx="10" cy="10" r="2.5"/>',
+  eyeOff: '<path d="M3 3l14 14M8.3 5A8 8 0 0110 4.5c5 0 8 5.5 8 5.5a14 14 0 01-2.4 3M5.2 6.6A14 14 0 002 10s3 5.5 8 5.5a7.6 7.6 0 003.4-.8"/>',
+  gear: '<circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/>',
+  x: '<path d="M5 5l10 10M15 5L5 15"/>',
+};
+const smallIcon = (name) => `<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LEGEND_ICONS[name]}</svg>`;
+
+// 범례 틀: 지표가 바뀔 때만 다시 만들고, 값은 updateLegend()가 채운다.
+function renderLegend() {
+  const rows = settings.indicators.map((study) => {
+    const def = studyDef(study.type);
+    const vals = def.plots.filter((p) => p.kind !== 'color')
+      .map((p) => `<span class="v" data-plot="${p.key}" style="color:${study.colors[p.key]}"></span>`).join('');
+    return `<div class="row study ${study.hidden ? 'is-hidden' : ''}" data-id="${study.id}">
+      <span class="k">${studyTitle(study)}</span>${vals}
+      <span class="ind-actions">
+        <button data-act="toggle" title="${study.hidden ? '보이기' : '숨기기'}" aria-label="${study.hidden ? '보이기' : '숨기기'}">${smallIcon(study.hidden ? 'eyeOff' : 'eye')}</button>
+        <button data-act="settings" title="설정" aria-label="설정">${smallIcon('gear')}</button>
+        <button data-act="remove" title="삭제" aria-label="삭제">${smallIcon('x')}</button>
+      </span>
+    </div>`;
+  }).join('');
+  $('#legend').innerHTML = `<div class="row head"></div>${rows}`;
+  updateLegend();
+}
+
 function updateLegend() {
   if (!bars.length) return;
   const idx = hoverTime == null ? bars.length - 1 : bars.findIndex((b) => b.time === hoverTime);
@@ -292,25 +301,34 @@ function updateLegend() {
   const cls = change >= 0 ? 'up' : 'down';
   const interval = INTERVALS.find((i) => i.id === settings.interval).label;
 
-  let html = `<div class="row"><span class="title">${marketLabel()}</span><span class="k">${interval} · ${feed.name}</span>
-    <span><span class="k">시</span> <span class="${cls}">${fmt(bar.open, digits)}</span></span>
-    <span><span class="k">고</span> <span class="${cls}">${fmt(bar.high, digits)}</span></span>
-    <span><span class="k">저</span> <span class="${cls}">${fmt(bar.low, digits)}</span></span>
-    <span><span class="k">종</span> <span class="${cls}">${fmt(bar.close, digits)}</span></span>
-    <span class="${cls}">${change >= 0 ? '+' : ''}${fmt(change, digits)} (${((change / prev.close) * 100).toFixed(2)}%)</span></div>`;
-
-  for (const [id, ind] of active) {
-    const def = INDICATORS.find((d) => d.id === id);
-    const values = Object.entries(ind.series).map(([, s]) => {
-      const point = s.dataByIndex(s.data().findIndex((d) => d.time === bar.time));
-      return point && 'value' in point ? point.value : null;
-    }).filter((v) => v != null);
-    if (!values.length) continue;
-    const text = values.map((v) => (id === 'volume' ? fmtVol(v) : fmt(v, id === 'rsi' ? 2 : digits))).join('  ');
-    html += `<div class="row"><span class="k">${def.label}</span><span style="color:${def.color}">${text}</span></div>`;
+  const head = $('#legend .head');
+  if (head) {
+    head.innerHTML = `<span class="title">${marketLabel()}</span><span class="k">${interval} · ${feed.name}</span>
+      <span><span class="k">시</span> <span class="${cls}">${fmt(bar.open, digits)}</span></span>
+      <span><span class="k">고</span> <span class="${cls}">${fmt(bar.high, digits)}</span></span>
+      <span><span class="k">저</span> <span class="${cls}">${fmt(bar.low, digits)}</span></span>
+      <span><span class="k">종</span> <span class="${cls}">${fmt(bar.close, digits)}</span></span>
+      <span class="${cls}">${change >= 0 ? '+' : ''}${fmt(change, digits)} (${((change / prev.close) * 100).toFixed(2)}%)</span>`;
   }
-  $('#legend').innerHTML = html;
+  for (const [id, inst] of active) {
+    const row = $(`#legend .study[data-id="${id}"]`);
+    if (!row) continue;
+    for (const el of row.querySelectorAll('.v')) {
+      const v = inst.values[el.dataset.plot]?.get(bar.time);
+      el.textContent = v == null ? '' : inst.def.format === 'volume' ? fmtVol(v) : fmt(v, inst.def.pane === 'sub' ? 2 : digits);
+    }
+  }
 }
+
+$('#legend').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = btn.closest('.study').dataset.id;
+  const study = settings.indicators.find((x) => x.id === id);
+  if (btn.dataset.act === 'toggle') { study.hidden = !study.hidden; saveStudies(); }
+  if (btn.dataset.act === 'remove') removeStudy(id);
+  if (btn.dataset.act === 'settings') openStudySettings(id);
+});
 
 // ---------- 그리기 도구 ----------
 const ICONS = {
@@ -457,28 +475,114 @@ $('#chart-type').addEventListener('change', (e) => {
   setMainData();
 });
 
-function renderIndicatorMenu() {
-  $('#indicator-menu').innerHTML = INDICATORS.map((d) => `
-    <label><input type="checkbox" value="${d.id}" ${settings.indicators.includes(d.id) ? 'checked' : ''} />
-    ${d.label}<span class="swatch" style="background:${d.color}"></span></label>`).join('');
-}
-$('#indicator-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const menu = $('#indicator-menu');
-  const r = e.currentTarget.getBoundingClientRect();
-  menu.style.top = `${r.bottom + 4}px`;
-  menu.style.left = `${Math.min(r.left, innerWidth - 236)}px`;
-  menu.hidden = !menu.hidden;
-});
-$('#indicator-menu').addEventListener('click', (e) => e.stopPropagation());
-$('#indicator-menu').addEventListener('change', (e) => {
-  const id = e.target.value;
-  settings.indicators = e.target.checked ? [...settings.indicators, id] : settings.indicators.filter((x) => x !== id);
+// ---------- 지표 추가 창 ----------
+const studyDialog = $('#study-dialog');
+
+function saveStudies() {
   save();
   buildIndicators();
-  updateLegend();
+  if (studyDialog.open) renderStudyDialog();
+}
+
+function addStudy(type) {
+  settings.indicators.push(newStudy(type));
+  saveStudies();
+}
+
+function removeStudy(id) {
+  settings.indicators = settings.indicators.filter((x) => x.id !== id);
+  saveStudies();
+}
+
+function renderStudyDialog() {
+  const q = $('#study-search').value.trim().toLowerCase();
+  $('#study-applied').innerHTML = settings.indicators.length
+    ? `<h3>적용된 지표 ${settings.indicators.length}개</h3>` + settings.indicators.map((st) => `
+      <div class="study-item" data-id="${st.id}">
+        <span>${studyTitle(st)}${st.hidden ? ' <span class="muted">(숨김)</span>' : ''}</span>
+        <span class="study-item-actions">
+          <button class="btn small" data-act="settings">설정</button>
+          <button class="btn small danger" data-act="remove">삭제</button>
+        </span>
+      </div>`).join('')
+    : '<p class="muted">적용된 지표가 없습니다. 아래에서 고르세요.</p>';
+  $('#study-list').innerHTML = CATEGORIES.map((cat) => {
+    const items = STUDIES.filter((d) => d.category === cat && (!q || d.name.toLowerCase().includes(q) || d.short.toLowerCase().includes(q)));
+    if (!items.length) return '';
+    return `<h3>${cat}</h3>` + items.map((d) => `
+      <button class="study-add" data-type="${d.type}"><span>${d.name}</span><span class="muted">${d.pane === 'sub' ? '아래 창' : '가격 위'} · 추가 +</span></button>`).join('');
+  }).join('') || '<p class="muted">검색 결과가 없습니다.</p>';
+}
+
+$('#indicator-btn').addEventListener('click', () => {
+  $('#study-search').value = '';
+  renderStudyDialog();
+  studyDialog.showModal();
+  $('#study-search').focus();
 });
-document.addEventListener('click', () => { $('#indicator-menu').hidden = true; });
+$('#study-search').addEventListener('input', renderStudyDialog);
+studyDialog.addEventListener('click', (e) => {
+  if (e.target === studyDialog || e.target.closest('[data-close]')) return studyDialog.close();
+  const add = e.target.closest('.study-add');
+  if (add) return addStudy(add.dataset.type);
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = btn.closest('.study-item').dataset.id;
+  if (btn.dataset.act === 'remove') removeStudy(id);
+  if (btn.dataset.act === 'settings') openStudySettings(id);
+});
+
+// ---------- 지표 설정 창 ----------
+const settingsDialog = $('#study-settings');
+let editingId = null;
+
+function field(input, value) {
+  const id = `sp-${input.key}`;
+  const control = input.options
+    ? `<select id="${id}" name="${input.key}">${input.options.map(([v, label]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`
+    : `<input id="${id}" name="${input.key}" type="number" value="${value}" ${input.min != null ? `min="${input.min}"` : ''} ${input.max != null ? `max="${input.max}"` : ''} step="${input.step ?? 'any'}" required />`;
+  return `<label class="field" for="${id}"><span>${input.label}</span>${control}</label>`;
+}
+
+function renderStudySettings(study) {
+  const def = studyDef(study.type);
+  const levels = (def.levels ?? []).map((l) => ({ ...l, step: 'any' }));
+  $('#study-settings-title').textContent = `${def.name} 설정`;
+  $('#study-settings-body').innerHTML = `
+    ${def.inputs.length ? `<h3>입력값</h3><div class="fields">${def.inputs.map((i) => field(i, study.params[i.key])).join('')}</div>` : ''}
+    ${levels.length ? `<h3>기준선</h3><div class="fields">${levels.map((l) => field(l, study.params[l.key])).join('')}</div>` : ''}
+    <h3>색</h3>
+    <div class="fields">${def.plots.map((p) => `
+      <label class="field color" for="sc-${p.key}"><span>${p.label}</span><input id="sc-${p.key}" name="color:${p.key}" type="color" value="${study.colors[p.key]}" /></label>`).join('')}
+    </div>`;
+}
+
+function openStudySettings(id) {
+  const study = settings.indicators.find((x) => x.id === id);
+  if (!study) return;
+  editingId = id;
+  renderStudySettings(study);
+  settingsDialog.showModal();
+}
+
+$('#study-settings-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const study = settings.indicators.find((x) => x.id === editingId);
+  const def = studyDef(study.type);
+  const form = new FormData(e.currentTarget);
+  for (const input of [...def.inputs, ...(def.levels ?? [])]) {
+    const raw = form.get(input.key);
+    study.params[input.key] = input.options ? raw : Number(raw);
+  }
+  for (const plot of def.plots) study.colors[plot.key] = form.get(`color:${plot.key}`);
+  settingsDialog.close();
+  saveStudies();
+});
+$('#study-settings-reset').addEventListener('click', () => {
+  const study = settings.indicators.find((x) => x.id === editingId);
+  renderStudySettings({ ...newStudy(study.type), id: study.id });
+});
+$('#study-settings-cancel').addEventListener('click', () => settingsDialog.close());
 
 const themeIcon = () => { $('#theme-btn').textContent = settings.theme === 'dark' ? '☀' : '☾'; };
 themeIcon();
@@ -683,7 +787,6 @@ setInterval(() => {
 
 // ---------- 시작 ----------
 renderIntervals();
-renderIndicatorMenu();
 drawings.magnet = !!settings.magnet;
 renderTools();
 createMainSeries();

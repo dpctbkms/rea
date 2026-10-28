@@ -23,10 +23,7 @@
         <option value="line">라인</option>
         <option value="area">영역</option>
       </select>
-      <div class="menu">
-        <button id="indicator-btn" class="btn">지표</button>
-        <div id="indicator-menu" class="menu-panel" hidden></div>
-      </div>
+      <button id="indicator-btn" class="btn">지표</button>
       <div class="spacer"></div>
       <button id="screenshot-btn" class="btn icon" title="스크린샷 저장">📷</button>
       <button id="theme-btn" class="btn icon" title="테마 전환">☀</button>
@@ -74,6 +71,31 @@
         <div class="actions">
           <button type="button" id="key-cancel" class="btn">취소</button>
           <button type="submit" class="btn primary">저장</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="study-dialog" class="search studies" aria-labelledby="study-dialog-title">
+      <div class="dialog-head">
+        <h2 id="study-dialog-title">지표</h2>
+        <button class="btn icon" data-close aria-label="닫기">✕</button>
+      </div>
+      <input id="study-search" type="text" placeholder="지표 검색 (예: RSI, 이동평균, 일목)" autocomplete="off" />
+      <div class="studies-body">
+        <div id="study-applied"></div>
+        <div id="study-list"></div>
+      </div>
+    </dialog>
+
+    <dialog id="study-settings" class="search key study-settings" aria-labelledby="study-settings-title">
+      <form id="study-settings-form">
+        <h2 id="study-settings-title">지표 설정</h2>
+        <div id="study-settings-body"></div>
+        <div class="actions">
+          <button type="button" id="study-settings-reset" class="btn small">기본값</button>
+          <span class="spacer"></span>
+          <button type="button" id="study-settings-cancel" class="btn">취소</button>
+          <button type="submit" class="btn primary">확인</button>
         </div>
       </form>
     </dialog>
