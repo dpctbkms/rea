@@ -60,16 +60,24 @@ export function bucketStart(timeSec, step) {
   return Math.floor(timeSec / step) * step;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // 여러 주소를 순서대로 시도해 처음 성공한 JSON을 돌려준다(지역 차단 대비).
+// 요청이 너무 잦다고 거절(429)되면 잠시 쉬었다가 한 번 더 시도한다. 브라우저에서는 이런 거절이
+// CORS 헤더 없이 와서 상태 코드 대신 네트워크 오류로 보이므로, 오류도 같은 방식으로 다룬다.
 export async function fetchJson(urls) {
   let lastError;
   for (const url of [urls].flat()) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return await res.json();
-      lastError = new Error(`${new URL(url).host} ${res.status}`);
-    } catch (err) {
-      lastError = err;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt) await sleep(700);
+      try {
+        const res = await fetch(url);
+        if (res.ok) return await res.json();
+        lastError = new Error(`${new URL(url).host} ${res.status}`);
+        if (res.status !== 429) break;
+      } catch (err) {
+        lastError = err;
+      }
     }
   }
   throw lastError;

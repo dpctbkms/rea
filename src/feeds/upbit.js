@@ -3,6 +3,7 @@ import { cached, fetchJson, intervalSeconds, normalizeBars, socket, sortMarkets,
 // 업비트와 빗썸은 같은 형식의 API를 제공한다.
 // 캔들 스트림 대신 체결(trade) 스트림으로 현재 봉을 만든다.
 const PAGES = 5; // 요청당 최대 200개
+const PAGE_GAP_MS = 150; // 초당 요청 제한(약 10회)에 걸리지 않도록
 const PING = { every: 60000, message: 'PING' };
 
 const candlePath = (interval) => ({
@@ -40,6 +41,7 @@ function upbitStyleFeed({ id, name, rest, ws, coins, pageCursor }) {
         rows.push(...data);
         to = `&to=${encodeURIComponent(pageCursor(data[data.length - 1]))}`;
         if (data.length < 200) break;
+        await new Promise((r) => setTimeout(r, PAGE_GAP_MS));
       }
       return normalizeBars(rows.map((r) => ({
         time: Date.parse(r.candle_date_time_utc + 'Z') / 1000,
