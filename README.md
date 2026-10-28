@@ -32,6 +32,12 @@ npm test           # 지표 계산 단위 테스트
 
 `?feed=demo`를 URL에 붙이면 네트워크 없이 데모 데이터로 실행합니다.
 
+## GitHub Pages 배포
+
+`.github/workflows/deploy.yml`이 기본 브랜치에 푸시될 때마다 테스트, 빌드, 배포를 실행합니다.
+처음 한 번은 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 바꿔야 합니다.
+배포 주소는 `https://<계정>.github.io/<저장소>/`입니다. Actions 탭에서 **Deploy to GitHub Pages → Run workflow**로 수동 배포도 할 수 있습니다.
+
 ## 구조
 
 | 파일 | 역할 |
