@@ -3,11 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
     <title>Rea Chart</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <header class="topbar">
+      <select id="source" class="select source" aria-label="거래소"></select>
       <button id="symbol-btn" class="symbol-btn" title="심볼 검색 (아무 글자나 입력)">
         <span id="symbol-label">BTCUSDT</span>
       </button>
@@ -45,7 +47,7 @@
 
       <aside class="watchlist">
         <div class="watch-head">
-          <span>관심 목록</span>
+          <span id="watch-title">관심 목록</span>
         </div>
         <div class="watch-cols"><span>심볼</span><span>가격</span><span>변동</span></div>
         <ul id="watch-list"></ul>

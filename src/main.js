@@ -2,7 +2,7 @@ import {
   createChart, CandlestickSeries, BarSeries, LineSeries, AreaSeries, HistogramSeries,
   CrosshairMode, ColorType, LineStyle,
 } from 'lightweight-charts';
-import { BinanceFeed, DemoFeed, INTERVALS, SYMBOLS } from './datafeed.js';
+import { FEEDS, INTERVALS, COINS } from './feeds/index.js';
 import { sma, ema, bollinger, rsi, macd, vwap, heikinAshi } from './indicators.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -12,15 +12,21 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const STORAGE_KEY = 'rea-chart-settings';
 const settings = Object.assign(
   {
-    symbol: 'BTCUSDT',
+    source: 'upbit',
+    coin: 'BTC',
     interval: '1h',
     chartType: 'candles',
     theme: 'dark',
     indicators: ['volume', 'ema20', 'ema50'],
-    lines: {}, // { [symbol]: number[] } 수평선 가격
+    lines: {}, // { ['거래소:코인']: number[] } 수평선 가격
   },
   load(),
 );
+// 예전 버전 설정(symbol: 'BTCUSDT') 이어받기.
+if (settings.symbol) {
+  settings.coin = settings.symbol.replace(/USDT$/, '');
+  delete settings.symbol;
+}
 
 function load() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? {}; } catch { return {}; }
@@ -45,7 +51,13 @@ const INDICATORS = [
 
 // ---------- 상태 ----------
 const params = new URLSearchParams(location.search);
-let feed = params.get('feed') === 'demo' || window.REA_FEED === 'demo' ? new DemoFeed() : new BinanceFeed();
+const forceDemo = params.get('feed') === 'demo' || window.REA_FEED === 'demo';
+const feedById = (id) => FEEDS.find((f) => f.id === id) ?? FEEDS[0];
+let feed = feedById(forceDemo ? 'demo' : settings.source);
+let feedError = null; // 선택한 거래소에 연결하지 못한 이유
+if (!feed.coins.includes(settings.coin)) settings.coin = feed.coins[0];
+const marketLabel = () => `${settings.coin}/${feed.quote}`;
+const lineKey = () => `${feed.id}:${settings.coin}`;
 let bars = [];
 let mainSeries = null;
 let active = new Map(); // indicator id -> { series: {key: ISeriesApi}, compute(bars) -> {key: data[]} }
@@ -81,7 +93,9 @@ function applyTheme() {
 }
 
 function priceFormatFor(price) {
-  const precision = price >= 1000 ? 2 : price >= 1 ? 3 : price >= 0.01 ? 5 : 8;
+  const precision = feed.quote === 'KRW'
+    ? (price >= 100 ? 0 : price >= 1 ? 2 : 4)
+    : (price >= 1000 ? 2 : price >= 1 ? 3 : price >= 0.01 ? 5 : 8);
   return { type: 'price', precision, minMove: 1 / 10 ** precision };
 }
 
@@ -199,16 +213,21 @@ async function loadSymbol() {
   const id = ++loadId;
   unsubscribeBars();
   $('#loading').hidden = false;
-  $('#symbol-label').textContent = settings.symbol;
-  document.title = `${settings.symbol} · Rea Chart`;
+  $('#symbol-label').textContent = marketLabel();
+  document.title = `${marketLabel()} · Rea Chart`;
   try {
-    bars = await feed.getBars(settings.symbol, settings.interval, 1000);
+    bars = await feed.getBars(settings.coin, settings.interval);
+    if (!bars.length) throw new Error('빈 응답');
+    feedError = null;
   } catch (err) {
-    if (feed instanceof DemoFeed) throw err;
-    console.warn('실시간 피드 연결 실패, 데모 데이터로 전환합니다.', err);
-    feed = new DemoFeed();
+    if (id !== loadId) return;
+    if (feed.id === 'demo') throw err;
+    console.warn(`${feed.name} 연결 실패, 데모 데이터로 전환합니다.`, err);
+    feedError = `${feed.name}에 연결하지 못했습니다`;
+    feed = feedById('demo');
+    $('#symbol-label').textContent = marketLabel();
     startTickers();
-    bars = await feed.getBars(settings.symbol, settings.interval, 1000);
+    bars = await feed.getBars(settings.coin, settings.interval);
   }
   if (id !== loadId) return;
   setMainData();
@@ -217,10 +236,10 @@ async function loadSymbol() {
   $('#loading').hidden = true;
   updateLegend();
   updateStatus();
-  unsubscribeBars = feed.subscribeBars(settings.symbol, settings.interval, (bar) => {
+  unsubscribeBars = feed.subscribeBars(settings.coin, settings.interval, (bar) => {
     if (id !== loadId) return;
     onBar(bar);
-  });
+  }, bars[bars.length - 1]);
 }
 
 function onBar(bar) {
@@ -251,7 +270,7 @@ function updateLegend() {
   const cls = change >= 0 ? 'up' : 'down';
   const interval = INTERVALS.find((i) => i.id === settings.interval).label;
 
-  let html = `<div class="row"><span class="title">${settings.symbol}</span><span class="k">${interval} · ${feed.name}</span>
+  let html = `<div class="row"><span class="title">${marketLabel()}</span><span class="k">${interval} · ${feed.name}</span>
     <span><span class="k">시</span> <span class="${cls}">${fmt(bar.open, digits)}</span></span>
     <span><span class="k">고</span> <span class="${cls}">${fmt(bar.high, digits)}</span></span>
     <span><span class="k">저</span> <span class="${cls}">${fmt(bar.low, digits)}</span></span>
@@ -274,7 +293,7 @@ function updateLegend() {
 // ---------- 수평선 그리기 ----------
 function restoreLines() {
   priceLines.forEach((l) => mainSeries.removePriceLine(l));
-  priceLines = (settings.lines[settings.symbol] ?? []).map(addPriceLine);
+  priceLines = (settings.lines[lineKey()] ?? []).map(addPriceLine);
 }
 
 function addPriceLine(price) {
@@ -285,7 +304,7 @@ chart.subscribeClick((p) => {
   if (tool !== 'hline' || !p.point) return;
   const price = mainSeries.coordinateToPrice(p.point.y);
   if (price == null) return;
-  (settings.lines[settings.symbol] ??= []).push(price);
+  (settings.lines[lineKey()] ??= []).push(price);
   priceLines.push(addPriceLine(price));
   save();
   setTool('cursor');
@@ -295,7 +314,7 @@ function setTool(next) {
   if (next === 'clear') {
     priceLines.forEach((l) => mainSeries.removePriceLine(l));
     priceLines = [];
-    delete settings.lines[settings.symbol];
+    delete settings.lines[lineKey()];
     save();
     next = 'cursor';
   }
@@ -367,7 +386,7 @@ $('#screenshot-btn')?.addEventListener('click', () => {
   chart.takeScreenshot().toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${settings.symbol}_${settings.interval}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+    a.download = `${settings.coin}${feed.quote}_${settings.interval}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
@@ -386,20 +405,21 @@ function openSearch(initial = '') {
 
 function searchMatches() {
   const q = $('#search-input').value.trim().toUpperCase();
-  return SYMBOLS.filter((s) => s.symbol.includes(q) || s.name.toUpperCase().includes(q));
+  return COINS.filter((c) => feed.coins.includes(c.id)
+    && (c.id.includes(q) || c.name.includes(q) || feed.market(c.id).includes(q)));
 }
 
 function renderSearch() {
   const list = searchMatches();
   searchIndex = Math.min(searchIndex, Math.max(list.length - 1, 0));
-  $('#search-results').innerHTML = list.map((s, i) =>
-    `<li data-symbol="${s.symbol}" class="${i === searchIndex ? 'selected' : ''}"><span>${s.symbol}</span><span>${s.name}</span></li>`).join('');
+  $('#search-results').innerHTML = list.map((c, i) =>
+    `<li data-coin="${c.id}" class="${i === searchIndex ? 'selected' : ''}"><span>${feed.market(c.id)}</span><span>${c.name} · ${feed.name}</span></li>`).join('');
 }
 
-function selectSymbol(symbol) {
+function selectCoin(coin) {
   dialog.close();
-  if (symbol === settings.symbol) return;
-  settings.symbol = symbol;
+  if (coin === settings.coin) return;
+  settings.coin = coin;
   save();
   renderWatchlist();
   loadSymbol();
@@ -411,11 +431,11 @@ $('#search-input').addEventListener('keydown', (e) => {
   const list = searchMatches();
   if (e.key === 'ArrowDown') { searchIndex = Math.min(searchIndex + 1, list.length - 1); renderSearch(); e.preventDefault(); }
   if (e.key === 'ArrowUp') { searchIndex = Math.max(searchIndex - 1, 0); renderSearch(); e.preventDefault(); }
-  if (e.key === 'Enter' && list[searchIndex]) selectSymbol(list[searchIndex].symbol);
+  if (e.key === 'Enter' && list[searchIndex]) selectCoin(list[searchIndex].id);
 });
 $('#search-results').addEventListener('click', (e) => {
   const li = e.target.closest('li');
-  if (li) selectSymbol(li.dataset.symbol);
+  if (li) selectCoin(li.dataset.coin);
 });
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
 
@@ -431,25 +451,28 @@ document.addEventListener('keydown', (e) => {
 const tickers = new Map();
 
 function renderWatchlist() {
-  $('#watch-list').innerHTML = SYMBOLS.map((s) => {
-    const t = tickers.get(s.symbol);
+  $('#watch-title').textContent = `관심 목록 · ${feed.name}`;
+  $('#watch-list').innerHTML = feed.coins.map((coin) => {
+    const t = tickers.get(coin);
     const cls = t ? (t.changePct >= 0 ? 'up' : 'down') : '';
-    return `<li data-symbol="${s.symbol}" class="${s.symbol === settings.symbol ? 'active' : ''}">
-      <span class="sym">${s.symbol.replace('USDT', '')}</span>
+    return `<li data-coin="${coin}" class="${coin === settings.coin ? 'active' : ''}">
+      <span class="sym">${coin}</span>
       <span>${t ? fmt(t.price, priceFormatFor(t.price).precision) : '—'}</span>
       <span class="${cls}">${t ? `${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : ''}</span></li>`;
   }).join('');
 }
 $('#watch-list').addEventListener('click', (e) => {
   const li = e.target.closest('li');
-  if (li) selectSymbol(li.dataset.symbol);
+  if (li) selectCoin(li.dataset.coin);
 });
 
 let watchRender = 0;
 function startTickers() {
   unsubscribeTickers();
-  unsubscribeTickers = feed.subscribeTickers(SYMBOLS.map((s) => s.symbol), (t) => {
-    tickers.set(t.symbol, t);
+  tickers.clear();
+  renderWatchlist();
+  unsubscribeTickers = feed.subscribeTickers(feed.coins, (t) => {
+    tickers.set(t.coin, t);
     // 틱마다 다시 그리지 않고 프레임당 한 번만.
     watchRender ||= requestAnimationFrame(() => { watchRender = 0; renderWatchlist(); });
   });
@@ -459,10 +482,26 @@ function startTickers() {
 function updateStatus() {
   $('#feed-status').textContent = window.REA_FEED === 'demo'
     ? '데모 데이터 (웹 공유 버전은 외부 시세에 접속할 수 없음)'
-    : feed instanceof DemoFeed
-    ? '데모 데이터 (실시간 피드에 연결할 수 없음)'
-    : '실시간 · Binance';
+    : feedError
+    ? `${feedError}. 데모 데이터로 표시 중`
+    : feed.id === 'demo'
+    ? '데모 데이터'
+    : `실시간 · ${feed.name} (${feed.quote})`;
 }
+
+// ---------- 거래소 선택 ----------
+$('#source').innerHTML = FEEDS.map((f) => `<option value="${f.id}">${f.name}</option>`).join('');
+$('#source').value = feed.id;
+$('#source').hidden = forceDemo;
+$('#source').addEventListener('change', (e) => {
+  settings.source = e.target.value;
+  feed = feedById(settings.source);
+  feedError = null;
+  if (!feed.coins.includes(settings.coin)) settings.coin = feed.coins[0];
+  save();
+  startTickers();
+  loadSymbol();
+});
 setInterval(() => {
   $('#clock').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false }) + ' (로컬)';
 }, 1000);
@@ -470,7 +509,6 @@ setInterval(() => {
 // ---------- 시작 ----------
 renderIntervals();
 renderIndicatorMenu();
-renderWatchlist();
 createMainSeries();
 buildIndicators();
 startTickers();

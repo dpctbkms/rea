@@ -1,0 +1,23 @@
+name: Check price feeds
+
+# 각 거래소 시세 연결을 실제로 점검한다. 결과는 실행 요약(Summary)에 표로 나온다.
+on:
+  push:
+    paths:
+      - 'src/feeds/**'
+      - 'scripts/check-feeds.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-feeds.mjs

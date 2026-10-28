@@ -8,7 +8,7 @@
 
 ## 기능
 
-- **실시간 시세**: Binance 공개 REST/WebSocket API(API 키 불필요). 연결이 안 되면 자동으로 데모 데이터로 전환합니다.
+- **실시간 시세 (무료, API 키 불필요)**: 업비트, 빗썸(원화), 바이낸스, 바이비트, OKX(USDT), 코인베이스(USD). 툴바 맨 왼쪽에서 거래소를 고릅니다. 연결이 안 되면 자동으로 데모 데이터로 전환하고 상태 표시줄에 알려 줍니다.
 - **타임프레임**: 1분, 5분, 15분, 1시간, 4시간, 1일, 1주
 - **차트 종류**: 캔들, 하이킨아시, 바, 라인, 영역
 - **지표**: 거래량, SMA 20, EMA 20/50/200, 볼린저 밴드, VWAP, RSI 14(하단 창), MACD 12/26/9(하단 창)
@@ -43,8 +43,11 @@ npm test           # 지표 계산 단위 테스트
 | 파일 | 역할 |
 | --- | --- |
 | `src/main.js` | 차트 생성, UI 이벤트, 범례, 그리기, 관심 목록 |
-| `src/datafeed.js` | `BinanceFeed`(실시간)와 `DemoFeed`(랜덤워크). 둘 다 같은 인터페이스를 가집니다. |
+| `src/feeds/` | 거래소별 시세 피드. 모두 같은 인터페이스를 가집니다(`common.js` 맨 위 설명 참고). |
+| `scripts/check-feeds.mjs` | 거래소에 실제로 접속해 시세 연결을 점검합니다(`npm run check:feeds`). GitHub Actions의 **Check price feeds**로도 돌릴 수 있습니다. |
 | `src/indicators.js` | SMA, EMA, 볼린저, RSI(Wilder), MACD, VWAP, 하이킨아시 계산 |
-| `test/indicators.test.js` | 지표 단위 테스트(`node --test`) |
+| `test/` | 지표·피드 도우미 단위 테스트(`node --test`) |
 
-다른 거래소나 주식 데이터를 붙이려면 `getBars`, `subscribeBars`, `subscribeTickers` 세 메서드를 가진 피드 클래스를 새로 만들면 됩니다.
+다른 거래소나 주식 데이터를 붙이려면 `src/feeds/`에 같은 인터페이스의 피드를 만들어 `src/feeds/index.js`의 `FEEDS`에 추가하면 됩니다.
+
+사이트에는 `noindex` 표시가 있어 검색엔진 결과에 나오지 않습니다.

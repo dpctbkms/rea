@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
-    "build:artifact": "node scripts/build-artifact.mjs"
+    "build:artifact": "node scripts/build-artifact.mjs",
+    "check:feeds": "node scripts/check-feeds.mjs"
   },
   "dependencies": {
     "lightweight-charts": "5.1.0"
