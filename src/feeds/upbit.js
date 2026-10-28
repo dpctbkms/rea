@@ -10,7 +10,7 @@ const candlePath = (interval) => ({
   '1d': 'days', '1w': 'weeks',
 })[interval];
 
-function upbitStyleFeed({ id, name, rest, ws, coins }) {
+function upbitStyleFeed({ id, name, rest, ws, coins, pageCursor }) {
   const request = (type, codes) => (sock) => sock.send(JSON.stringify([
     { ticket: `rea-${Math.random().toString(36).slice(2)}` },
     { type, codes },
@@ -32,8 +32,7 @@ function upbitStyleFeed({ id, name, rest, ws, coins }) {
         const data = await fetchJson(`${rest}/candles/${candlePath(interval)}?market=KRW-${coin}&count=200${to}`);
         if (!Array.isArray(data) || !data.length) break;
         rows.push(...data);
-        const oldest = data[data.length - 1].candle_date_time_utc;
-        to = `&to=${encodeURIComponent(oldest + 'Z')}`;
+        to = `&to=${encodeURIComponent(pageCursor(data[data.length - 1]))}`;
         if (data.length < 200) break;
       }
       return normalizeBars(rows.map((r) => ({
@@ -74,6 +73,7 @@ export const upbit = upbitStyleFeed({
   name: '업비트',
   rest: 'https://api.upbit.com/v1',
   ws: 'wss://api.upbit.com/websocket/v1',
+  pageCursor: (oldest) => `${oldest.candle_date_time_utc}Z`,
   coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT'],
 });
 
@@ -82,5 +82,7 @@ export const bithumb = upbitStyleFeed({
   name: '빗썸',
   rest: 'https://api.bithumb.com/v1',
   ws: 'wss://ws-api.bithumb.com/websocket/v1',
+  // 빗썸은 'Z'가 붙은 시각을 거부하고, 시간대 없는 시각을 한국 시간으로 읽는다.
+  pageCursor: (oldest) => oldest.candle_date_time_kst,
   coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT'],
 });

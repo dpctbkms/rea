@@ -10,7 +10,7 @@ export const binance = {
   quote: 'USDT',
   coins: ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'BNB'],
   market: (coin) => `${coin}USDT`,
-  probeUrl: `${REST[0]}/klines?symbol=BTCUSDT&interval=1h&limit=1`,
+  probeUrl: `${REST[1]}/klines?symbol=BTCUSDT&interval=1h&limit=1`,
 
   async getBars(coin, interval) {
     const rows = await fetchJson(REST.map((r) => `${r}/klines?symbol=${coin}USDT&interval=${interval}&limit=1000`));
