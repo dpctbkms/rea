@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rea Chart</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <button id="symbol-btn" class="symbol-btn" title="심볼 검색 (아무 글자나 입력)">
+        <span id="symbol-label">BTCUSDT</span>
+      </button>
+      <div class="divider"></div>
+      <div id="intervals" class="group" role="group" aria-label="타임프레임"></div>
+      <div class="divider"></div>
+      <select id="chart-type" class="select" aria-label="차트 종류">
+        <option value="candles">캔들</option>
+        <option value="heikin">하이킨아시</option>
+        <option value="bars">바</option>
+        <option value="line">라인</option>
+        <option value="area">영역</option>
+      </select>
+      <div class="menu">
+        <button id="indicator-btn" class="btn">지표</button>
+        <div id="indicator-menu" class="menu-panel" hidden></div>
+      </div>
+      <div class="spacer"></div>
+      <button id="screenshot-btn" class="btn icon" title="스크린샷 저장">📷</button>
+      <button id="theme-btn" class="btn icon" title="테마 전환">☀</button>
+    </header>
+
+    <main class="layout">
+      <nav class="tools" aria-label="그리기 도구">
+        <button class="tool active" data-tool="cursor" title="십자선">✛</button>
+        <button class="tool" data-tool="hline" title="수평선 (클릭해서 추가)">―</button>
+        <button class="tool" data-tool="clear" title="그린 선 모두 삭제">🗑</button>
+      </nav>
+
+      <section class="chart-wrap">
+        <div id="legend" class="legend"></div>
+        <div id="chart" class="chart"></div>
+        <div id="loading" class="loading" hidden>불러오는 중…</div>
+      </section>
+
+      <aside class="watchlist">
+        <div class="watch-head">
+          <span>관심 목록</span>
+        </div>
+        <div class="watch-cols"><span>심볼</span><span>가격</span><span>변동</span></div>
+        <ul id="watch-list"></ul>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <span id="feed-status"></span>
+      <span id="clock"></span>
+    </footer>
+
+    <dialog id="search-dialog" class="search">
+      <input id="search-input" type="text" placeholder="심볼 검색" autocomplete="off" />
+      <ul id="search-results"></ul>
+    </dialog>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
