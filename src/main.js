@@ -5,7 +5,7 @@ import {
 import { FEEDS, INTERVALS } from './feeds/index.js';
 import { heikinAshi } from './indicators.js';
 import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
-import { DrawingManager, TOOLS, COLORS } from './drawings.js';
+import { DrawingManager, TOOLS, COLORS, LINE_STYLES } from './drawings.js';
 import { BarCountdown } from './countdown.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -319,7 +319,6 @@ chart.subscribeCrosshairMove((p) => {
   hoverTime = p.time ?? null;
   crosshairPoint = p.point ?? null;
   updateLegend();
-  drawings.handleMove(p.point);
 });
 
 const LEGEND_ICONS = {
@@ -417,6 +416,8 @@ const ICONS = {
   undo: '<path d="M7 5L3 9l4 4"/><path d="M3 9h9a5 5 0 010 10H9"/>',
   redo: '<path d="M13 5l4 4-4 4"/><path d="M17 9H8a5 5 0 000 10h3"/>',
   clear: '<path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11"/>',
+  stay: '<path d="M4 16l1-4 8-8 3 3-8 8z"/><path d="M11 6l3 3"/><rect x="12.5" y="13" width="5" height="4" rx="1"/><path d="M13.5 13v-1a1.5 1.5 0 013 0v1"/>',
+  copy: '<rect x="6" y="6" width="10" height="11" rx="1.5"/><path d="M4 13V4.5A1.5 1.5 0 015.5 3H13"/>',
   gear: '<path d="M8.7 2.5h2.6l.4 2 1.5.7 1.7-1.1 1.8 1.8-1.1 1.7.7 1.5 2 .4v2.6l-2 .4-.7 1.5 1.1 1.7-1.8 1.8-1.7-1.1-1.5.7-.4 2H8.7l-.4-2-1.5-.7-1.7 1.1-1.8-1.8 1.1-1.7-.7-1.5-2-.4V8.7l2-.4.7-1.5-1.1-1.7 1.8-1.8 1.7 1.1 1.5-.7z"/><circle cx="10" cy="10" r="2.4"/>',
   fullscreen: '<path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/>',
   camera: '<path d="M3 7h3l1.5-2h5L14 7h3v9H3z"/><circle cx="10" cy="11.5" r="3"/>',
@@ -484,6 +485,7 @@ function renderTools() {
       return `<button class="tool ${isActive ? 'active' : ''}" data-group="${g.id}" title="${info.label}${key ? ` (${key})` : ''}" aria-label="${info.label}">${icon(current)}${caret}</button>`;
     }),
     '<div class="tools-sep"></div>',
+    `<button class="tool ${drawings.stay ? 'active' : ''}" data-action="stay" title="드로잉 모드 유지: 다 그려도 같은 도구로 계속 그림" aria-label="드로잉 모드 유지" aria-pressed="${drawings.stay}">${icon('stay')}</button>`,
     `<button class="tool ${drawings.magnet ? 'active' : ''}" data-action="magnet" title="자석: 점을 가까운 시가·고가·저가·종가에 붙임" aria-label="자석" aria-pressed="${drawings.magnet}">${icon('magnet')}</button>`,
     `<button class="tool ${drawings.locked ? 'active' : ''}" data-action="lock" title="${drawings.locked ? '그림 잠금 풀기' : '그림 모두 잠그기'}" aria-label="잠금" aria-pressed="${drawings.locked}">${icon(drawings.locked ? 'lock' : 'unlock')}</button>`,
     `<button class="tool ${drawings.hidden ? 'active' : ''}" data-action="hide" title="${drawings.hidden ? '그림 보이기' : '그림 모두 숨기기'}" aria-label="숨기기" aria-pressed="${drawings.hidden}">${icon(drawings.hidden ? 'eyeOff' : 'eye')}</button>`,
@@ -494,7 +496,11 @@ function renderTools() {
   $('.chart-wrap').classList.toggle('drawing', tool !== 'cursor');
   const t = TOOLS.find((x) => x.id === tool);
   $('#draw-hint').hidden = tool === 'cursor';
-  if (t) $('#draw-hint').textContent = `${t.label}: 차트에서 ${t.points === 1 ? '한 곳을' : `${t.points}곳을 차례로`} 누르세요 · Esc로 취소`;
+  if (t) {
+    $('#draw-hint').textContent = t.points === 1 ? `${t.label}: 차트를 누르세요 · Esc 취소`
+      : t.points === 2 ? `${t.label}: 누른 채 끌거나 두 곳을 차례로 누르세요 · Shift로 각도 고정 · Esc 취소`
+      : `${t.label}: 두 점을 찍은 뒤 폭을 정할 곳을 누르세요 · Esc 취소`;
+  }
 }
 
 function pickTool(groupId, id) {
@@ -541,6 +547,7 @@ $('.tools').addEventListener('click', (e) => {
   }
   const action = btn.dataset.action;
   if (action === 'magnet') { drawings.magnet = !drawings.magnet; settings.magnet = drawings.magnet; save(); renderTools(); }
+  if (action === 'stay') { drawings.stay = !drawings.stay; settings.stayDrawing = drawings.stay; save(); renderTools(); }
   if (action === 'lock') { drawings.locked = !drawings.locked; drawings.select(null); renderTools(); }
   if (action === 'hide') { drawings.hidden = !drawings.hidden; drawings.select(null); drawings.update(); renderTools(); }
   if (action === 'clear') drawings.clear();
@@ -555,7 +562,11 @@ document.addEventListener('pointerdown', (e) => {
   if (!$('#flyout').hidden && !e.target.closest('#flyout, .tools')) closeFlyout();
 }, true);
 
-// 선택한 도형의 색 바꾸기·글자 고치기·삭제
+// 선택한 도형의 떠 있는 도구 막대: 색, 선 두께, 선 모양, 설정, 잠금, 삭제
+const LINE_STYLE_LABELS = { solid: '실선', dashed: '파선', dotted: '점선' };
+const HAS_LINE = (d) => !['text', 'measure', 'long', 'short'].includes(d.type);
+const lineStyleSvg = (style, width = 2) => `<svg width="28" height="10" aria-hidden="true"><line x1="2" y1="5" x2="26" y2="5" stroke="currentColor" stroke-width="${width}" stroke-dasharray="${(LINE_STYLES[style] ?? []).join(' ')}" stroke-linecap="round"/></svg>`;
+
 function renderSelectionBar() {
   const d = drawings.selected;
   const bar = $('#draw-bar');
@@ -563,62 +574,140 @@ function renderSelectionBar() {
   if (!d) return;
   const label = TOOLS.find((t) => t.id === d.type).label;
   bar.innerHTML = `<span class="draw-bar-label">${label}</span>`
-    + (d.type === 'measure' ? '' : COLORS.map((c) => `<button class="swatch-btn ${c === d.color ? 'active' : ''}" data-color="${c}" style="--c:${c}" title="색 바꾸기" aria-label="색 ${c}"></button>`).join(''))
-    + (d.type === 'text' ? '<button class="btn small" data-action="edit">글자 수정</button>' : '')
-    + '<button class="btn small danger" data-action="delete" title="삭제 (Delete)">삭제</button>';
+    + (d.type === 'measure' ? '' : `<button class="bar-btn" data-action="color" title="색" aria-label="색"><span class="color-dot" style="--c:${d.color}"></span></button>`)
+    + (HAS_LINE(d) ? `<button class="bar-btn" data-action="width" title="선 두께">${lineStyleSvg('solid', d.width ?? 2)}<span>${d.width ?? 2}px</span></button>
+      <button class="bar-btn" data-action="style" title="선 모양">${lineStyleSvg(d.lineStyle ?? 'solid')}</button>` : '')
+    + `<button class="bar-btn" data-action="settings" title="설정 (더블클릭)" aria-label="설정">${icon('gear', 16)}</button>
+      <button class="bar-btn ${d.locked ? 'on' : ''}" data-action="lock" title="${d.locked ? '잠금 풀기' : '잠그기'}" aria-label="잠금">${icon(d.locked ? 'lock' : 'unlock', 16)}</button>
+      <button class="bar-btn danger" data-action="delete" title="삭제 (Delete)" aria-label="삭제">${icon('clear', 16)}</button>`;
 }
 
 $('#draw-bar').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
-  if (!btn) return;
-  if (btn.dataset.color) drawings.updateSelected({ color: btn.dataset.color });
-  if (btn.dataset.action === 'delete') drawings.removeSelected();
-  if (btn.dataset.action === 'edit') {
-    const text = window.prompt('텍스트를 입력하세요', drawings.selected.text);
-    if (text?.trim()) drawings.updateSelected({ text: text.trim() });
+  const d = drawings.selected;
+  if (!btn || !d) return;
+  const act = btn.dataset.action;
+  if (act === 'color') {
+    openPopover(btn, `<div class="palette">${COLORS.map((c) => `<button class="swatch-btn ${c === d.color ? 'active' : ''}" data-value="${c}" style="--c:${c}" aria-label="${c}"></button>`).join('')}</div>`,
+      (c) => drawings.updateSelected({ color: c }));
   }
+  if (act === 'width') {
+    openPopover(btn, [1, 2, 3, 4].map((w) => `<div class="pop-item ${w === (d.width ?? 2) ? 'active' : ''}" data-value="${w}">${lineStyleSvg('solid', w)}<span>${w}px</span></div>`).join(''),
+      (w) => drawings.updateSelected({ width: Number(w) }));
+  }
+  if (act === 'style') {
+    openPopover(btn, Object.keys(LINE_STYLES).map((st) => `<div class="pop-item ${st === (d.lineStyle ?? 'solid') ? 'active' : ''}" data-value="${st}">${lineStyleSvg(st)}<span>${LINE_STYLE_LABELS[st]}</span></div>`).join(''),
+      (st) => drawings.updateSelected({ lineStyle: st }));
+  }
+  if (act === 'settings') openDrawingSettings();
+  if (act === 'lock') drawings.updateSelected({ locked: !d.locked });
+  if (act === 'delete') drawings.removeSelected();
 });
 
+// 도형 설정 창 (더블클릭)
+const drawingDialog = $('#drawing-settings');
+function openDrawingSettings() {
+  const d = drawings.selected;
+  if (!d) return;
+  const label = TOOLS.find((t) => t.id === d.type).label;
+  const check = (key, text, on) => `<label class="field check" for="ds-${key}"><input id="ds-${key}" name="${key}" type="checkbox" ${on ? 'checked' : ''} /><span>${text}</span></label>`;
+  $('#drawing-settings-title').textContent = `${label} 설정`;
+  $('#drawing-settings-body').innerHTML = `
+    <h3>모양</h3>
+    <div class="fields">
+      ${d.type === 'measure' ? '' : `<label class="field color" for="ds-color"><span>색</span><input id="ds-color" name="color" type="color" value="${d.color}" /></label>`}
+      ${HAS_LINE(d) ? `<label class="field" for="ds-width"><span>선 두께</span><select id="ds-width" name="width">${[1, 2, 3, 4].map((w) => `<option value="${w}" ${w === (d.width ?? 2) ? 'selected' : ''}>${w}px</option>`).join('')}</select></label>
+      <label class="field" for="ds-lineStyle"><span>선 모양</span><select id="ds-lineStyle" name="lineStyle">${Object.keys(LINE_STYLES).map((st) => `<option value="${st}" ${st === (d.lineStyle ?? 'solid') ? 'selected' : ''}>${LINE_STYLE_LABELS[st]}</option>`).join('')}</select></label>` : ''}
+    </div>
+    ${d.type === 'trend' || d.type === 'ray' ? `<h3>연장</h3><div class="fields">${check('extendLeft', '왼쪽으로 연장', d.extendLeft)}${check('extendRight', '오른쪽으로 연장', d.extendRight ?? d.type === 'ray')}</div>` : ''}
+    ${d.type === 'text' ? `<h3>텍스트</h3><div class="fields one">
+      <label class="field" for="ds-text"><span>내용</span><textarea id="ds-text" name="text" rows="3">${d.text ?? ''}</textarea></label>
+      <label class="field" for="ds-fontSize"><span>글자 크기</span><select id="ds-fontSize" name="fontSize">${[10, 12, 14, 18, 24, 32].map((f) => `<option value="${f}" ${f === (d.fontSize ?? 14) ? 'selected' : ''}>${f}</option>`).join('')}</select></label></div>` : ''}
+    <h3>기타</h3>
+    <div class="fields">${check('locked', '잠금 (옮기지 않기)', d.locked)}</div>`;
+  drawingDialog.showModal();
+}
+$('#drawing-settings-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const d = drawings.selected;
+  const f = new FormData(e.currentTarget);
+  const patch = { locked: f.has('locked') };
+  if (f.has('color')) patch.color = f.get('color');
+  if (f.has('width')) patch.width = Number(f.get('width'));
+  if (f.has('lineStyle')) patch.lineStyle = f.get('lineStyle');
+  if (d.type === 'trend' || d.type === 'ray') { patch.extendLeft = f.has('extendLeft'); patch.extendRight = f.has('extendRight'); }
+  if (d.type === 'text') { patch.text = String(f.get('text')).trim() || d.text; patch.fontSize = Number(f.get('fontSize')); }
+  drawingDialog.close();
+  drawings.updateSelected(patch);
+});
+$('#drawing-settings-cancel').addEventListener('click', () => drawingDialog.close());
 
-// 도형을 잡고 끌면 차트 대신 도형이 움직이도록, 차트보다 먼저(캡처 단계에서) 이벤트를 가로챈다.
+// 포인터 입력. 차트보다 먼저(캡처 단계에서) 받아서,
+// - 그리기 중에는 누름·끌기·뗌으로 점을 찍고 (차트가 같이 움직이지 않게 막음)
+// - 커서 모드에서 도형을 잡으면 차트 대신 도형을 옮긴다.
 const chartEl = $('#chart');
 const localPoint = (e) => {
   const r = chartEl.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 };
+const inMainPane = (pt) => pt.x >= 0 && pt.y >= 0 && pt.x <= chart.timeScale().width() && pt.y <= chart.panes()[0].getHeight();
 let press = null; // 누른 위치·시각 (탭 판정용)
+let lastTap = null; // 더블클릭(더블탭) 판정용
+let blockChart = false;
+
 chartEl.addEventListener('pointerdown', (e) => {
-  press = { point: localPoint(e), at: performance.now(), id: e.pointerId, touch: e.pointerType !== 'mouse' };
-  if (e.button !== 0 || !drawings.beginDrag(press.point, press.touch)) return;
+  const pt = localPoint(e);
+  const touch = e.pointerType !== 'mouse';
+  // drawing: 이 누름이 그리기였는지 (점을 찍다가 도형이 완성돼 커서로 돌아가도 탭으로 치지 않도록)
+  press = { point: pt, at: performance.now(), id: e.pointerId, touch, drawing: drawings.tool !== 'cursor' };
+  if (e.button !== 0) return;
+  if (drawings.tool !== 'cursor') {
+    if (!inMainPane(pt)) return;
+    blockChart = true;
+    lastTap = null;
+    drawings.pressDraw(pt, e.shiftKey);
+  } else if (drawings.beginDrag(pt, touch, e.ctrlKey || e.metaKey)) {
+    blockChart = true;
+  } else {
+    return;
+  }
   e.stopPropagation();
   e.preventDefault();
 }, { capture: true });
 for (const type of ['mousedown', 'touchstart']) {
-  chartEl.addEventListener(type, (e) => { if (drawings.drag) e.stopPropagation(); }, { capture: true });
+  chartEl.addEventListener(type, (e) => { if (blockChart) e.stopPropagation(); }, { capture: true });
 }
 window.addEventListener('pointermove', (e) => {
-  if (drawings.drag) return drawings.dragTo(localPoint(e));
-  if (drawings.tool === 'cursor' && e.target.closest?.('#chart')) {
-    $('.chart-wrap').classList.toggle('hovering', !!drawings.hitTest(localPoint(e), e.pointerType === 'touch' ? 14 : 7));
+  const pt = localPoint(e);
+  if (drawings.drag) return drawings.dragTo(pt, e.shiftKey);
+  if (drawings.tool !== 'cursor') return drawings.handleMove(pt, e.shiftKey);
+  if (e.target.closest?.('#chart') && e.pointerType === 'mouse') {
+    $('.chart-wrap').classList.toggle('hovering', !!drawings.setHover(pt));
   }
 });
-window.addEventListener('pointerup', () => drawings.endDrag());
 
-// 점 찍기는 누름·뗌(포인터 이벤트)으로 직접 판정한다.
-// - 차트 라이브러리의 클릭 알림은 0.5초 안에 다른 곳을 누르면 빠뜨린다.
-// - 휴대폰에서는 차트가 터치를 막아서 브라우저의 click 이벤트가 아예 오지 않는다.
-// 끌어서 차트를 옮긴 경우, 오래 누른 경우, 가격·시간 눈금 위를 누른 경우는 제외한다.
+// 탭(짧게 누르고 떼기) 판정. 차트 라이브러리의 클릭 알림은 0.5초 안의 두 번째 클릭을 빠뜨리고,
+// 휴대폰에서는 브라우저 click이 오지 않아서 직접 판정한다.
 const TAP_MAX_MS = 600;
+const DOUBLE_TAP_MS = 350;
 chartEl.addEventListener('pointerup', (e) => {
   const start = press;
   press = null;
-  if (!start || start.id !== e.pointerId || performance.now() - start.at > TAP_MAX_MS) return;
   const pt = localPoint(e);
-  if (Math.hypot(pt.x - start.point.x, pt.y - start.point.y) > (start.touch ? 10 : 5)) return;
-  if (pt.x > chart.timeScale().width() || pt.y > chart.panes()[0].getHeight()) return;
-  drawings.handleClick(pt);
+  blockChart = false;
+  if (drawings.drag) { drawings.endDrag(); }
+  if (start?.drawing) return drawings.releaseDraw(pt, e.shiftKey);
+  if (!start || start.id !== e.pointerId || performance.now() - start.at > TAP_MAX_MS) return;
+  if (Math.hypot(pt.x - start.point.x, pt.y - start.point.y) > (start.touch ? 10 : 5) || !inMainPane(pt)) return;
+  drawings.handleClick(pt, { touch: start.touch });
+  // 같은 도형을 빠르게 두 번 누르면 설정 창
+  const id = drawings.selected?.id;
+  const now = performance.now();
+  if (id && lastTap && lastTap.id === id && now - lastTap.at < DOUBLE_TAP_MS) { lastTap = null; return openDrawingSettings(); }
+  lastTap = id ? { id, at: now } : null;
 }, { capture: true });
-window.addEventListener('pointercancel', () => drawings.endDrag());
+window.addEventListener('pointerup', () => { blockChart = false; drawings.endDrag(); });
+window.addEventListener('pointercancel', () => { blockChart = false; drawings.endDrag(); });
 
 // ---------- 펼침 메뉴 (툴바·오른쪽 클릭 공용) ----------
 const popover = $('#popover');
@@ -994,6 +1083,8 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (mod && k === 'z') { e.preventDefault(); return e.shiftKey ? drawings.redo() : drawings.undo(); }
   if (mod && k === 'y') { e.preventDefault(); return drawings.redo(); }
+  if (mod && k === 'c' && drawings.selected) { e.preventDefault(); return drawings.copySelected(); }
+  if (mod && k === 'v' && drawings.clipboard) { e.preventDefault(); return drawings.paste(); }
   if (mod) return;
   if (e.altKey) {
     if (e.code === 'KeyR' && e.shiftKey) { e.preventDefault(); return pickTool('shapes', 'rect'); }
@@ -1020,7 +1111,13 @@ document.addEventListener('keydown', (e) => {
   }
   if (/^[0-9]$/.test(e.key)) { intervalBuffer = e.key; return showIntervalInput(); }
   if (e.key === '/') { e.preventDefault(); return $('#indicator-btn').click(); }
-  if (e.key === 'Escape') { drawings.setTool('cursor'); drawings.select(null); closePopover(); closeFlyout(); return; }
+  if (e.key === 'Escape') {
+    // 그리던 도형이 있으면 그것만 취소, 없으면 도구를 끄고 선택을 푼다
+    if (!drawings.cancelDraft()) { drawings.setTool('cursor'); drawings.select(null); }
+    closePopover();
+    closeFlyout();
+    return;
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && drawings.selected) { e.preventDefault(); return drawings.removeSelected(); }
   if (/^[a-zA-Z]$/.test(e.key)) { e.preventDefault(); openSearch(e.key.toUpperCase()); }
 });
@@ -1181,12 +1278,34 @@ setInterval(tick, 1000);
 chartEl.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const pt = localPoint(e);
+  const hit = drawings.tool === 'cursor' && drawings.hitTest(pt);
+  if (hit) {
+    drawings.select(hit.drawing.id);
+    const d = hit.drawing;
+    const items = [
+      ['settings', '설정…', ''],
+      ['duplicate', '복제', `${shortcut('드래그')}`],
+      ['copy', '복사', shortcut('C')],
+      ['lock', d.locked ? '잠금 풀기' : '잠그기', ''],
+      ['sep'],
+      ['delete', '삭제', 'Delete'],
+    ];
+    return openPopover(chartEl, items.map(([v, label, key]) => (v === 'sep' ? '<div class="pop-sep"></div>'
+      : `<div class="pop-item" data-value="${v}" role="menuitem"><span>${label}</span><span class="fly-key">${key}</span></div>`)).join(''), (v) => {
+      if (v === 'settings') openDrawingSettings();
+      if (v === 'duplicate') drawings.duplicateSelected();
+      if (v === 'copy') drawings.copySelected();
+      if (v === 'lock') drawings.updateSelected({ locked: !d.locked });
+      if (v === 'delete') drawings.removeSelected();
+    }, { x: e.clientX, y: e.clientY });
+  }
   const price = pt.y <= chart.panes()[0].getHeight() ? mainSeries.coordinateToPrice(pt.y) : null;
   const digits = bars.length ? priceFormatFor(bars[bars.length - 1].close).precision : 2;
   const items = [
     ['reset', '차트 초기화', 'Alt+R'],
     ...(price != null ? [['hline', `${fmt(price, digits)}에 수평선 그리기`, 'Alt+H']] : []),
     ['sep'],
+    ...(drawings.clipboard ? [['paste', '붙여넣기', shortcut('V')]] : []),
     ['clear-drawings', '이 종목 그림 모두 지우기', ''],
     ['clear-studies', '지표 모두 제거', ''],
     ['sep'],
@@ -1196,6 +1315,7 @@ chartEl.addEventListener('contextmenu', (e) => {
     : `<div class="pop-item" data-value="${v}" role="menuitem"><span>${label}</span><span class="fly-key">${key}</span></div>`)).join(''), (v) => {
     if (v === 'reset') resetChart();
     if (v === 'hline') { pickTool('lines', 'hline'); drawings.handleClick(pt); }
+    if (v === 'paste') drawings.paste();
     if (v === 'clear-drawings') drawings.clear();
     if (v === 'clear-studies') { settings.indicators = []; saveStudies(); }
     if (v === 'settings') openChartSettings();
@@ -1253,6 +1373,7 @@ renderChartTypeBtn();
 applyScale();
 setPanel(settings.panelOpen);
 drawings.magnet = !!settings.magnet;
+drawings.stay = !!settings.stayDrawing;
 renderTools();
 createMainSeries();
 buildIndicators();
