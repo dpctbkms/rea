@@ -425,10 +425,10 @@ const localPoint = (e) => {
   const r = chartEl.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 };
-let pressedAt = null;
+let press = null; // 누른 위치·시각 (탭 판정용)
 chartEl.addEventListener('pointerdown', (e) => {
-  pressedAt = localPoint(e);
-  if (e.button !== 0 || !drawings.beginDrag(pressedAt, e.pointerType === 'touch')) return;
+  press = { point: localPoint(e), at: performance.now(), id: e.pointerId, touch: e.pointerType !== 'mouse' };
+  if (e.button !== 0 || !drawings.beginDrag(press.point, press.touch)) return;
   e.stopPropagation();
   e.preventDefault();
 }, { capture: true });
@@ -443,14 +443,20 @@ window.addEventListener('pointermove', (e) => {
 });
 window.addEventListener('pointerup', () => drawings.endDrag());
 
-// 차트 라이브러리의 클릭 알림은 0.5초 안에 다른 곳을 누르면 빠뜨리므로, 클릭을 직접 받는다.
-// 끌어서 차트를 옮긴 경우와 가격·시간 눈금 위를 누른 경우는 제외한다.
-chartEl.addEventListener('click', (e) => {
+// 점 찍기는 누름·뗌(포인터 이벤트)으로 직접 판정한다.
+// - 차트 라이브러리의 클릭 알림은 0.5초 안에 다른 곳을 누르면 빠뜨린다.
+// - 휴대폰에서는 차트가 터치를 막아서 브라우저의 click 이벤트가 아예 오지 않는다.
+// 끌어서 차트를 옮긴 경우, 오래 누른 경우, 가격·시간 눈금 위를 누른 경우는 제외한다.
+const TAP_MAX_MS = 600;
+chartEl.addEventListener('pointerup', (e) => {
+  const start = press;
+  press = null;
+  if (!start || start.id !== e.pointerId || performance.now() - start.at > TAP_MAX_MS) return;
   const pt = localPoint(e);
-  if (!pressedAt || Math.hypot(pt.x - pressedAt.x, pt.y - pressedAt.y) > 5) return;
+  if (Math.hypot(pt.x - start.point.x, pt.y - start.point.y) > (start.touch ? 10 : 5)) return;
   if (pt.x > chart.timeScale().width() || pt.y > chart.panes()[0].getHeight()) return;
   drawings.handleClick(pt);
-});
+}, { capture: true });
 window.addEventListener('pointercancel', () => drawings.endDrag());
 
 // ---------- 툴바 ----------
