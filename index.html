@@ -9,50 +9,68 @@
   </head>
   <body>
     <header class="topbar">
-      <select id="source" class="select source" aria-label="거래소"></select>
-      <button id="symbol-btn" class="symbol-btn" title="심볼 검색 (아무 글자나 입력)">
-        <span id="symbol-label">BTCUSDT</span>
+      <button id="symbol-btn" class="symbol-btn" title="종목 검색 (글자를 바로 입력해도 됩니다)">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
+        <span id="symbol-label">BTC</span>
       </button>
+      <select id="source" class="select source" aria-label="거래소"></select>
       <div class="divider"></div>
       <div id="intervals" class="group" role="group" aria-label="타임프레임"></div>
       <div class="divider"></div>
-      <select id="chart-type" class="select" aria-label="차트 종류">
-        <option value="candles">캔들</option>
-        <option value="heikin">하이킨아시</option>
-        <option value="bars">바</option>
-        <option value="line">라인</option>
-        <option value="area">영역</option>
-      </select>
-      <button id="indicator-btn" class="btn">지표</button>
+      <button id="chart-type-btn" class="btn icon" title="차트 종류" aria-label="차트 종류" aria-haspopup="menu"></button>
+      <div class="divider"></div>
+      <button id="indicator-btn" class="btn" title="지표 (/)">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 17c1.5 0 2-1 2.4-3l1.4-8c.3-1.6 1-2.5 2.7-2.5M7 8h7M13 11l4 5M17 11l-4 5"/></svg>
+        <span class="label">지표</span>
+      </button>
+      <div class="divider"></div>
+      <button id="undo-btn" class="btn icon" aria-label="실행 취소"></button>
+      <button id="redo-btn" class="btn icon" aria-label="다시 실행"></button>
       <div class="spacer"></div>
-      <button id="screenshot-btn" class="btn icon" title="스크린샷 저장">📷</button>
-      <button id="theme-btn" class="btn icon" title="테마 전환">☀</button>
+      <button id="settings-btn" class="btn icon" title="차트 설정" aria-label="차트 설정"></button>
+      <button id="fullscreen-btn" class="btn icon" title="전체 화면" aria-label="전체 화면"></button>
+      <button id="screenshot-btn" class="btn icon" title="스크린샷 저장" aria-label="스크린샷 저장"></button>
+      <button id="theme-btn" class="btn icon" title="테마 전환" aria-label="테마 전환"></button>
     </header>
 
     <main class="layout">
       <nav class="tools" aria-label="그리기 도구"></nav>
+      <div id="flyout" class="flyout" role="menu" hidden></div>
 
       <section class="chart-wrap">
         <div id="legend" class="legend"></div>
         <div id="draw-bar" class="draw-bar" hidden></div>
         <div id="draw-hint" class="draw-hint" hidden></div>
+        <div id="interval-input" class="interval-input" hidden></div>
         <div id="chart" class="chart"></div>
         <div id="loading" class="loading" hidden>불러오는 중…</div>
       </section>
 
-      <aside class="watchlist">
+      <aside id="side-panel" class="watchlist">
         <div class="watch-head">
           <span id="watch-title">관심 목록</span>
         </div>
-        <div class="watch-cols"><span>심볼</span><span>가격</span><span>변동</span></div>
+        <div class="watch-cols"><span>종목</span><span>현재가</span><span>변동</span><span>변동%</span></div>
         <ul id="watch-list"></ul>
+        <section id="details" class="details" aria-label="종목 정보"></section>
       </aside>
+      <nav class="rail" aria-label="오른쪽 패널">
+        <button id="panel-btn" class="rail-btn active" title="관심 목록·종목 정보" aria-label="관심 목록 열기/닫기" aria-pressed="true"></button>
+      </nav>
     </main>
 
     <footer class="statusbar">
-      <span><span id="feed-status"></span> <button id="key-btn" class="link" hidden>API 키 설정</button></span>
-      <span id="clock"></span>
+      <div id="ranges" class="ranges" role="group" aria-label="기간"></div>
+      <span class="feed-wrap"><span id="feed-status" class="feed-status"></span> <button id="key-btn" class="link" hidden>API 키 설정</button></span>
+      <span class="spacer"></span>
+      <span id="clock" class="clock"></span>
+      <span class="divider small"></span>
+      <button id="scale-percent" class="scale-btn" title="퍼센트 눈금">%</button>
+      <button id="scale-log" class="scale-btn" title="로그 눈금">log</button>
+      <button id="scale-auto" class="scale-btn" title="자동 맞춤">auto</button>
     </footer>
+
+    <div id="popover" class="popover" role="menu" hidden></div>
 
     <dialog id="search-dialog" class="search">
       <input id="search-input" type="text" placeholder="종목 검색 (코드나 이름)" autocomplete="off" />
@@ -95,6 +113,19 @@
           <button type="button" id="study-settings-reset" class="btn small">기본값</button>
           <span class="spacer"></span>
           <button type="button" id="study-settings-cancel" class="btn">취소</button>
+          <button type="submit" class="btn primary">확인</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="chart-settings" class="search key study-settings" aria-labelledby="chart-settings-title">
+      <form id="chart-settings-form">
+        <h2 id="chart-settings-title">차트 설정</h2>
+        <div id="chart-settings-body"></div>
+        <div class="actions">
+          <button type="button" id="chart-settings-reset" class="btn small">기본값</button>
+          <span class="spacer"></span>
+          <button type="button" id="chart-settings-cancel" class="btn">취소</button>
           <button type="submit" class="btn primary">확인</button>
         </div>
       </form>

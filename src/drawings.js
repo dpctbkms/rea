@@ -3,16 +3,24 @@
 
 export const TOOLS = [
   { id: 'cursor', label: '선택·이동', points: 0 },
-  { id: 'trend', label: '추세선', points: 2 },
+  { id: 'trend', label: '추세선', points: 2, key: 'T' },
   { id: 'ray', label: '연장선', points: 2 },
-  { id: 'hline', label: '수평선', points: 1 },
-  { id: 'vline', label: '수직선', points: 1 },
+  { id: 'hline', label: '수평선', points: 1, key: 'H' },
+  { id: 'hray', label: '수평 광선', points: 1, key: 'J' },
+  { id: 'vline', label: '수직선', points: 1, key: 'V' },
+  { id: 'crossline', label: '십자선', points: 1, key: 'C' },
   { id: 'channel', label: '평행 채널', points: 3 },
-  { id: 'rect', label: '사각형', points: 2 },
-  { id: 'fib', label: '피보나치 되돌림', points: 2 },
-  { id: 'measure', label: '가격·기간 측정', points: 2 },
+  { id: 'fib', label: '피보나치 되돌림', points: 2, key: 'F' },
+  { id: 'rect', label: '사각형', points: 2, key: 'Shift+R' },
+  { id: 'ellipse', label: '타원', points: 2 },
   { id: 'text', label: '텍스트', points: 1 },
+  { id: 'long', label: '롱 포지션', points: 2 },
+  { id: 'short', label: '숏 포지션', points: 2 },
+  { id: 'measure', label: '가격·기간 측정', points: 2 },
 ];
+
+// 손잡이 없이 몸통만 끄는 도형
+const NO_HANDLES = ['hline', 'vline', 'crossline', 'text'];
 
 export const COLORS = ['#2962ff', '#f23645', '#089981', '#ff9800', '#9c27b0', '#787b86'];
 
@@ -45,6 +53,8 @@ export class DrawingManager {
     this.tool = 'cursor';
     this.magnet = false;
     this.selectedId = null;
+    this.locked = false; // 잠금: 도형을 옮기거나 바꿀 수 없음
+    this.hidden = false; // 숨기기: 도형을 그리지 않음
     this.draft = null; // 그리는 중인 도형
     this.hover = null; // 그리는 중 마우스 위치 (미리보기)
     this.drag = null;
@@ -225,6 +235,14 @@ export class DrawingManager {
       drawing.text = text.trim();
     }
     if (drawing.type === 'measure') drawing.color = COLORS[2];
+    if (drawing.type === 'long' || drawing.type === 'short') {
+      const [entry, target] = drawing.points;
+      // 목표가가 반대쪽에 찍혔으면 방향에 맞게 뒤집고, 손절가는 목표와 같은 거리로 둔다.
+      const dir = drawing.type === 'long' ? 1 : -1;
+      const reward = Math.abs(target.price - entry.price) * dir;
+      target.price = entry.price + reward;
+      drawing.points.push({ time: target.time, price: entry.price - reward });
+    }
     this.#snapshot();
     this.drawings.push(drawing);
     this.setTool('cursor');
@@ -240,7 +258,7 @@ export class DrawingManager {
 
   // 드래그 시작. 도형(또는 손잡이)을 잡았으면 true를 돌려준다 — 그러면 차트 이동을 막는다.
   beginDrag(point, touch) {
-    if (this.tool !== 'cursor') return false;
+    if (this.tool !== 'cursor' || this.locked || this.hidden) return false;
     const hit = this.hitTest(point, touch ? 14 : 7);
     if (!hit) return false;
     this.select(hit.drawing.id);
@@ -255,7 +273,12 @@ export class DrawingManager {
     if (!now || !start) return;
     if (!this.drag.moved) { this.#snapshot(); this.drag.moved = true; }
     if (hit.handle != null) {
-      hit.drawing.points[hit.handle] = now;
+      const d = hit.drawing;
+      d.points[hit.handle] = now;
+      // 포지션 도구: 목표·손절 손잡이는 같은 오른쪽 끝을 쓴다
+      if ((d.type === 'long' || d.type === 'short') && hit.handle > 0) {
+        d.points[1].time = d.points[2].time = now.time;
+      }
     } else {
       const dt = now.time - start.time, dp = now.price - start.price;
       hit.drawing.points = original.map((p) => ({ time: p.time + dt, price: p.price + dp }));
@@ -272,13 +295,14 @@ export class DrawingManager {
 
   // ---------- 클릭 판정 ----------
   hitTest(point, tolerance = 7) {
+    if (this.hidden) return null;
     const width = this.chart.timeScale().width();
     // 선택된 도형의 손잡이가 가장 우선
     const sel = this.selected;
     if (sel) {
       const px = sel.points.map((p) => this.#toPixel(p));
       const handle = px.findIndex((p) => p && Math.hypot(p.x - point.x, p.y - point.y) <= tolerance + 4);
-      if (handle >= 0 && !['hline', 'vline', 'text'].includes(sel.type)) return { drawing: sel, handle };
+      if (handle >= 0 && !NO_HANDLES.includes(sel.type)) return { drawing: sel, handle };
     }
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
@@ -292,6 +316,19 @@ export class DrawingManager {
     const [a, b, c] = px;
     switch (d.type) {
       case 'hline': return a && Math.abs(p.y - a.y) <= tol;
+      case 'hray': return a && p.x >= a.x - tol && Math.abs(p.y - a.y) <= tol;
+      case 'crossline': return a && (Math.abs(p.y - a.y) <= tol || Math.abs(p.x - a.x) <= tol);
+      case 'ellipse': {
+        if (!a || !b) return false;
+        const rx = Math.abs(b.x - a.x) / 2 + tol, ry = Math.abs(b.y - a.y) / 2 + tol;
+        const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+        return ((p.x - cx) / rx) ** 2 + ((p.y - cy) / ry) ** 2 <= 1;
+      }
+      case 'long': case 'short': {
+        if (!a || !b || !c) return false;
+        const [y1, y2] = [Math.min(b.y, c.y), Math.max(b.y, c.y)];
+        return p.x >= Math.min(a.x, b.x) - tol && p.x <= Math.max(a.x, b.x) + tol && p.y >= y1 - tol && p.y <= y2 + tol;
+      }
       case 'vline': return a && Math.abs(p.x - a.x) <= tol;
       case 'trend': return a && b && distToSegment(p, a, b) <= tol;
       case 'ray': return a && b && distToSegment(p, a, extendTo(a, b, width)) <= tol;
@@ -321,7 +358,7 @@ export class DrawingManager {
   // ---------- 그리기 ----------
   #draw(ctx, size) {
     if (!this.series || !this.getBars().length) return;
-    const items = [...this.drawings];
+    const items = this.hidden ? [] : [...this.drawings];
     if (this.draft && this.hover) items.push({ ...this.draft, points: [...this.draft.points, this.hover], draft: true });
     else if (this.draft) items.push({ ...this.draft, draft: true });
     ctx.save();
@@ -375,6 +412,55 @@ export class DrawingManager {
       case 'vline':
         line({ x: a.x, y: 0 }, { x: a.x, y: size.height });
         break;
+      case 'hray':
+        line(a, { x: size.width, y: a.y });
+        label(this.formatPrice(d.points[0].price), size.width - 4, a.y, 'right', d.color);
+        break;
+      case 'crossline':
+        line({ x: 0, y: a.y }, { x: size.width, y: a.y });
+        line({ x: a.x, y: 0 }, { x: a.x, y: size.height });
+        label(this.formatPrice(d.points[0].price), size.width - 4, a.y, 'right', d.color);
+        break;
+      case 'ellipse': {
+        if (!b) break;
+        ctx.beginPath();
+        ctx.ellipse((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2, 0, 0, Math.PI * 2);
+        ctx.save();
+        ctx.globalAlpha = 0.15;
+        ctx.fill();
+        ctx.restore();
+        ctx.stroke();
+        break;
+      }
+      case 'long': case 'short': {
+        if (!b) break;
+        const [entry, target] = d.points;
+        // 그리는 중에는 손절점이 아직 없어서 목표와 대칭으로 미리 보여 준다.
+        const stopPrice = d.points[2]?.price ?? 2 * entry.price - target.price;
+        const yStop = c?.y ?? this.series.priceToCoordinate(stopPrice);
+        if (yStop == null) break;
+        const x1 = Math.min(a.x, b.x), w = Math.abs(b.x - a.x);
+        ctx.save();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(8, 153, 129, 0.22)';
+        ctx.fillRect(x1, Math.min(a.y, b.y), w, Math.abs(b.y - a.y));
+        ctx.fillStyle = 'rgba(242, 54, 69, 0.22)';
+        ctx.fillRect(x1, Math.min(a.y, yStop), w, Math.abs(yStop - a.y));
+        ctx.strokeStyle = '#787b86';
+        ctx.lineWidth = 1;
+        line({ x: x1, y: a.y }, { x: x1 + w, y: a.y });
+        ctx.restore();
+        const pct = (p) => `${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
+        const gain = ((target.price - entry.price) / entry.price) * 100;
+        const loss = ((stopPrice - entry.price) / entry.price) * 100;
+        const rr = Math.abs(stopPrice - entry.price) ? Math.abs(target.price - entry.price) / Math.abs(stopPrice - entry.price) : 0;
+        const cx = x1 + w / 2;
+        const below = (y, other) => (y > other ? y + 14 : y - 14);
+        label(`목표 ${this.formatPrice(target.price)} (${pct(gain)})`, cx, below(b.y, a.y), 'center', '#089981');
+        label(`손절 ${this.formatPrice(stopPrice)} (${pct(loss)})`, cx, below(yStop, a.y), 'center', '#f23645');
+        label(`${d.type === 'long' ? '롱' : '숏'} 진입 ${this.formatPrice(entry.price)} · 손익비 ${rr.toFixed(2)}`, cx, a.y, 'center', '#363a45');
+        break;
+      }
       case 'channel': {
         if (!b) break;
         line(a, b);
@@ -472,7 +558,7 @@ export class DrawingManager {
   }
 
   #handles(ctx, d, px) {
-    if (['hline', 'vline', 'text'].includes(d.type) && !d.draft) return;
+    if (NO_HANDLES.includes(d.type) && !d.draft) return;
     ctx.save();
     ctx.setLineDash([]);
     ctx.lineWidth = 2;

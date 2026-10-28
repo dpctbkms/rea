@@ -79,7 +79,57 @@ button, select, input { font: inherit; color: inherit; }
 .btn:hover, .symbol-btn:hover, .select:hover, .group button:hover { background: var(--hover); }
 .group button.active { color: var(--accent); font-weight: 600; }
 .btn.icon { width: 32px; padding: 0; }
-.symbol-btn { font-weight: 700; font-size: 14px; }
+.symbol-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+}
+.symbol-btn svg { color: var(--muted); }
+.source { color: var(--muted); font-size: 12px; padding: 0 6px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; }
+.btn.icon { justify-content: center; }
+.btn:disabled { opacity: 0.35; cursor: default; }
+.btn:disabled:hover { background: transparent; }
+.group button.more { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; }
+.chev { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: 0.7; }
+
+/* 펼침 메뉴 (툴바·오른쪽 클릭) */
+.popover, .flyout {
+  position: fixed;
+  z-index: 30;
+  min-width: 180px;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.3);
+}
+.pop-item, .fly-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pop-item:hover, .fly-item:hover { background: var(--hover); }
+.pop-item.active, .fly-item.active { color: var(--accent); }
+.pop-item > span:first-of-type, .fly-item > span:first-of-type { flex: 1; }
+.pop-title { padding: 8px 14px 2px; color: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
+.pop-sep { height: 1px; margin: 5px 0; background: var(--border); }
+.fly-key { color: var(--muted); font-size: 11px; }
+.star { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 4px; color: var(--muted); }
+.star:hover { background: var(--border); }
+.star.on { color: #f7a21b; }
+.star.on svg { fill: currentColor; }
 .select { appearance: none; }
 .select option { background: var(--panel); }
 
@@ -103,7 +153,25 @@ button, select, input { font: inherit; color: inherit; }
   cursor: pointer;
   font-size: 16px;
 }
-.tool { display: grid; place-items: center; flex: none; }
+.tool { display: grid; place-items: center; flex: none; position: relative; }
+.caret {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+.caret::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  border-left: 5px solid transparent;
+  border-bottom: 5px solid var(--muted);
+}
+.caret:hover { background: var(--border); }
+.arrow-cursor .chart, .arrow-cursor .chart * { cursor: default; }
 .tool:hover:not(:disabled) { background: var(--hover); }
 .tool.active { color: var(--accent); background: var(--hover); }
 .tool:disabled { opacity: 0.35; cursor: default; }
@@ -205,7 +273,7 @@ button, select, input { font: inherit; color: inherit; }
 }
 
 .watchlist {
-  width: 260px;
+  width: 330px;
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -214,13 +282,15 @@ button, select, input { font: inherit; color: inherit; }
 .watch-head { padding: 12px 12px 8px; font-weight: 600; }
 .watch-cols, #watch-list li {
   display: grid;
-  grid-template-columns: 1fr 1fr 64px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 1.1fr) 58px;
   gap: 6px;
   padding: 6px 12px;
+  font-size: 12px;
 }
+#watch-list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .watch-cols { color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border); }
 .watch-cols span:not(:first-child), #watch-list li span:not(:first-child) { text-align: right; }
-#watch-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+#watch-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 120px; }
 #watch-list li { cursor: pointer; font-variant-numeric: tabular-nums; }
 #watch-list li:hover { background: var(--hover); }
 #watch-list li.active { background: color-mix(in srgb, var(--accent) 15%, transparent); }
@@ -230,14 +300,79 @@ button, select, input { font: inherit; color: inherit; }
 
 .statusbar {
   display: flex;
-  justify-content: space-between;
-  height: 26px;
-  padding: 0 12px;
   align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px;
   border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.ranges { display: flex; gap: 2px; flex: none; }
+.ranges button, .scale-btn {
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+.ranges button:hover, .scale-btn:hover { background: var(--hover); }
+.ranges button.active, .scale-btn.active { color: var(--accent); }
+.feed-wrap { padding-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 11px; }
+.clock { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text); flex: none; }
+.divider.small { height: 16px; margin: 0 2px; }
+
+/* 오른쪽 끝 아이콘 막대 */
+.rail { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 44px; padding: 6px 0; border-left: 1px solid var(--border); flex: none; }
+.rail-btn { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.rail-btn:hover { background: var(--hover); color: var(--text); }
+.rail-btn.active { color: var(--accent); background: var(--hover); }
+
+/* 종목 정보 */
+.details { border-top: 1px solid var(--border); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; flex: none; }
+.d-head { display: flex; align-items: baseline; gap: 8px; }
+.d-sym { font-size: 15px; font-weight: 700; }
+.d-name, .d-exch, .d-label { color: var(--muted); font-size: 12px; }
+.d-price { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.d-price small { font-size: 12px; font-weight: 500; color: var(--muted); }
+.d-change { font-size: 14px; font-variant-numeric: tabular-nums; }
+.d-range { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.d-bar { position: relative; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--down), var(--muted), var(--up)); opacity: 0.85; }
+.d-bar span { position: absolute; top: -4px; width: 2px; height: 12px; margin-left: -1px; background: var(--text); border-radius: 1px; }
+.d-ends, .d-stat { display: flex; justify-content: space-between; font-size: 12px; font-variant-numeric: tabular-nums; }
+.d-stat { margin-top: 6px; color: var(--muted); }
+.d-stat span:last-child { color: var(--text); }
+
+/* 숫자 타임프레임 입력 */
+.interval-input {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 140px;
+  padding: 14px 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.3);
+}
+.interval-input strong { font-size: 28px; letter-spacing: 0.04em; }
+.interval-input span { color: var(--muted); font-size: 12px; }
+
+.field.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 13px; }
+.field.check input { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
 
 .search {
   width: min(520px, calc(100vw - 32px));
@@ -276,7 +411,9 @@ button, select, input { font: inherit; color: inherit; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 @media (max-width: 768px) {
-  .watchlist { display: none; }
+  .watchlist, .rail { display: none; }
+  #indicator-btn .label, .source { display: none; }
+  .feed-wrap { display: none; }
   .tools { width: 40px; padding: 4px 2px; }
   .tool { width: 34px; }
   .topbar { padding: 0 4px; }
