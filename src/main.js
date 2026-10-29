@@ -484,6 +484,8 @@ const ICONS = {
   camera: '<path d="M3 7h3l1.5-2h5L14 7h3v9H3z"/><circle cx="10" cy="11.5" r="3"/>',
   sun: '<circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4"/>',
   moon: '<path d="M16 12.5A7 7 0 017.5 4 7 7 0 1016 12.5z"/>',
+  plus: '<path d="M10 4v12M4 10h12"/>',
+  x: '<path d="M5 5l10 10M15 5L5 15"/>',
   search: '<circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/>',
   list: '<path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.5" cy="5" r=".9" fill="currentColor"/><circle cx="3.5" cy="10" r=".9" fill="currentColor"/><circle cx="3.5" cy="15" r=".9" fill="currentColor"/>',
   menu: '<path d="M3 5h14M3 10h14M3 15h14"/>',
@@ -532,7 +534,9 @@ const toolInfo = (id, groupId) => (groupId === 'cursor' ? CURSORS.find((c) => c.
 const altKey = (key) => (key ? `Alt+${key}` : '');
 
 // 휴대폰 화면 폭이면 트레이딩뷰 앱 같은 화면 (아래 탭, 아래에서 올라오는 메뉴)
-const appMedia = matchMedia('(max-width: 768px)');
+const appMedia = matchMedia('(max-width: 768px), (pointer: coarse) and (max-height: 520px)');
+// 휴대폰 가로: 아래 탭 없이 차트만 (style.css와 같은 조건)
+const landscapeMedia = matchMedia('(pointer: coarse) and (max-height: 520px) and (orientation: landscape)');
 const isApp = () => appMedia.matches;
 
 // 마지막으로 쓴 입력. 손가락이면 트레이딩뷰 모바일처럼 십자선으로 그린다.
@@ -1036,7 +1040,10 @@ chartEl.addEventListener('pointerup', (e) => {
     const tp = trackpad;
     trackpad = null;
     const tapped = start && Math.hypot(pt.x - start.point.x, pt.y - start.point.y) <= 10 && performance.now() - start.at <= TAP_MAX_MS;
-    if (tapped && drawings.tool !== 'cursor') drawings.handleClick(drawings.touchCursor ?? tp.cursor, {});
+    if (tapped && drawings.tool !== 'cursor') {
+      drawings.handleClick(drawings.touchCursor ?? tp.cursor, {});
+      navigator.vibrate?.(8); // 점을 찍을 때 살짝 진동 (지원하는 휴대폰만)
+    }
     return;
   }
   if (start?.drawing) return drawings.releaseDraw(pt, keysOf(e));
@@ -1073,6 +1080,32 @@ window.addEventListener('pointercancel', () => { blockChart = false; trackpad = 
 const popover = $('#popover');
 let popoverAnchor = null;
 
+// 휴대폰 시트: 위쪽 손잡이를 아래로 끌어 내리면 닫힌다 (트레이딩뷰 앱처럼)
+function sheetGrip(sheet, close) {
+  const grip = document.createElement('div');
+  grip.className = 'sheet-grip';
+  grip.setAttribute('aria-hidden', 'true');
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const startY = e.clientY;
+    let dy = 0;
+    const move = (ev) => { dy = Math.max(0, ev.clientY - startY); sheet.style.transform = `translateY(${dy}px)`; };
+    const up = () => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      sheet.style.transform = '';
+      if (dy > 70) close();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  });
+  return grip;
+}
+const popoverGrip = sheetGrip(popover, () => closePopover());
+
 function openPopover(anchor, html, onPick, at) {
   if (popoverAnchor && popoverAnchor === anchor && !popover.hidden) return closePopover();
   popover.innerHTML = html;
@@ -1084,6 +1117,7 @@ function openPopover(anchor, html, onPick, at) {
   $('#sheet-backdrop').hidden = !sheet;
   if (sheet) {
     popover.style.left = popover.style.top = '';
+    popover.prepend(popoverGrip);
   } else {
     const r = at ?? (() => { const b = anchor.getBoundingClientRect(); return { x: b.left, y: b.bottom + 4 }; })();
     const w = popover.offsetWidth, h = popover.offsetHeight;
@@ -1411,9 +1445,13 @@ function searchMatches() {
 function renderSearch() {
   const list = searchMatches();
   searchIndex = Math.min(searchIndex, Math.max(list.length - 1, 0));
-  $('#search-results').innerHTML = list.map((c, i) =>
-    `<li data-coin="${c.id}" class="${i === searchIndex ? 'selected' : ''}"><span>${feed.market(c.id)}</span><span>${c.name || c.id}</span></li>`).join('')
-    || '<li class="empty">검색 결과가 없습니다</li>';
+  // 트레이딩뷰처럼 로고·이름과 함께, 오른쪽 별로 관심 목록에 넣고 뺀다
+  $('#search-results').innerHTML = list.map((c, i) => {
+    const on = inWatch(c.id);
+    return `<li data-coin="${c.id}" class="${i === searchIndex ? 'selected' : ''}">${coinLogo(c.id)}
+      <span class="s-main"><span>${feed.market(c.id)}</span><small>${c.name || coinName(c.id) || c.id}</small></span>
+      <button class="watch-star ${on ? 'on' : ''}" data-star="${c.id}" title="${on ? '관심 목록에서 빼기' : '관심 목록에 넣기'}" aria-label="${on ? '관심 목록에서 빼기' : '관심 목록에 넣기'}" aria-pressed="${on}">${icon('star', 18)}</button></li>`;
+  }).join('') || '<li class="empty">검색 결과가 없습니다</li>';
   $('#search-count').textContent = markets ? `${feed.name} · 전체 ${markets.length.toLocaleString()}개 종목` : `${feed.name} · 종목 목록 불러오는 중…`;
 }
 
@@ -1441,6 +1479,8 @@ $('#search-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && list[searchIndex]) { e.preventDefault(); selectCoin(list[searchIndex].id); }
 });
 $('#search-results').addEventListener('click', (e) => {
+  const star = e.target.closest('[data-star]');
+  if (star) { toggleWatch(star.dataset.star); return renderSearch(); }
   const li = e.target.closest('li');
   if (li?.dataset.coin) selectCoin(li.dataset.coin);
 });
@@ -1516,23 +1556,104 @@ document.addEventListener('keydown', (e) => {
 // ---------- 관심 목록 ----------
 const tickers = new Map();
 
+// 관심 목록: 거래소마다 따로 저장한다 (처음엔 거래소 기본 목록). 검색 창의 별, 줄 밀기(휴대폰)·×(컴퓨터)로 넣고 뺀다.
+const watchCoins = () => settings.watchlists?.[feed.id] ?? feed.coins;
+const inWatch = (coin) => watchCoins().includes(coin);
+function toggleWatch(coin) {
+  const list = watchCoins();
+  settings.watchlists = { ...settings.watchlists, [feed.id]: list.includes(coin) ? list.filter((c) => c !== coin) : [...list, coin] };
+  save();
+  startTickers();
+}
+
+// 줄은 목록이 바뀔 때만 새로 만들고, 시세가 올 때는 값만 바꾼다 (반짝임 효과를 위해)
 function renderWatchlist() {
   $('#watch-title').textContent = isApp() ? '관심 목록' : `관심 목록 · ${feed.name}`;
   const listed = markets && new Set(markets.map((m) => m.id));
   const names = markets && new Map(markets.map((m) => [m.id, m.name]));
-  $('#watch-list').innerHTML = feed.coins.filter((c) => !listed || listed.has(c)).map((coin) => {
-    const t = tickers.get(coin);
-    const cls = t ? (t.changePct >= 0 ? 'up' : 'down') : '';
-    const digits = t ? priceFormatFor(t.price).precision : 0;
-    const diff = t ? t.price - t.price / (1 + t.changePct / 100) : 0;
-    const name = names?.get(coin) || coinName(coin) || feed.market(coin);
-    return `<li data-coin="${coin}" class="${coin === settings.coin ? 'active' : ''}">
-      <span class="sym">${coinLogo(coin)}<span class="sym-text"><b>${coin}</b><small>${name}</small></span></span>
-      <span class="last">${t ? fmt(t.price, digits) : '—'}</span>
-      <span class="chg ${cls}">${t ? `${diff >= 0 ? '+' : ''}${fmt(diff, digits)}` : ''}</span>
-      <span class="pct ${cls}">${t ? `${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : ''}</span></li>`;
-  }).join('');
+  const coins = watchCoins().filter((c) => !listed || listed.has(c) || feed.allowCustom);
+  const ul = $('#watch-list');
+  const key = `${feed.id}|${coins.join(',')}|${markets ? 1 : 0}`;
+  if (ul.dataset.key !== key) {
+    ul.dataset.key = key;
+    ul.innerHTML = coins.map((coin) => {
+      const name = names?.get(coin) || coinName(coin) || feed.market(coin);
+      return `<li data-coin="${coin}">
+        <div class="row-main">
+          <span class="sym">${coinLogo(coin)}<span class="sym-text"><b>${coin}</b><small>${name}</small></span></span>
+          <span class="last">—</span><span class="chg"></span><span class="pct"></span>
+        </div>
+        <button class="row-del" data-del="${coin}" title="관심 목록에서 빼기" aria-label="${coin} 관심 목록에서 빼기">${icon('x', 14)}</button></li>`;
+    }).join('') || '<li class="empty">관심 종목이 없습니다. + 를 눌러 추가하세요.</li>';
+  }
+  for (const li of ul.querySelectorAll('li[data-coin]')) updateWatchRow(li);
 }
+
+function updateWatchRow(li) {
+  const coin = li.dataset.coin;
+  const t = tickers.get(coin);
+  li.classList.toggle('active', coin === settings.coin);
+  if (!t) return;
+  const cls = t.changePct >= 0 ? 'up' : 'down';
+  const digits = priceFormatFor(t.price).precision;
+  const diff = t.price - t.price / (1 + t.changePct / 100);
+  const last = li.querySelector('.last');
+  const text = fmt(t.price, digits);
+  if (last.textContent !== text) {
+    const prev = Number(li.dataset.price);
+    last.textContent = text;
+    if (prev && prev !== t.price) {
+      last.classList.remove('flash-up', 'flash-down');
+      void last.offsetWidth; // 애니메이션을 처음부터 다시
+      last.classList.add(t.price > prev ? 'flash-up' : 'flash-down');
+    }
+    li.dataset.price = t.price;
+  }
+  const chg = li.querySelector('.chg'), pct = li.querySelector('.pct');
+  chg.className = `chg ${cls}`;
+  chg.textContent = `${diff >= 0 ? '+' : ''}${fmt(diff, digits)}`;
+  pct.className = `pct ${cls}`;
+  pct.textContent = `${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%`;
+}
+
+// 휴대폰: 줄을 왼쪽으로 밀면 삭제 버튼이 나온다
+const SWIPE_OPEN = -88;
+let swipe = null;
+let swipedAt = 0;
+const closeSwipes = (except) => {
+  for (const li of $('#watch-list').querySelectorAll('li.open')) if (li !== except) { li.classList.remove('open'); li.querySelector('.row-main').style.transform = ''; }
+};
+$('#watch-list').addEventListener('pointerdown', (e) => {
+  const li = e.target.closest('li[data-coin]');
+  if (!li || e.pointerType === 'mouse' || e.target.closest('.row-del')) return;
+  closeSwipes(li);
+  swipe = { li, x: e.clientX, y: e.clientY, base: li.classList.contains('open') ? SWIPE_OPEN : 0, dx: 0, active: false };
+});
+$('#watch-list').addEventListener('pointermove', (e) => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    if (Math.abs(dy) > 10) { swipe = null; return; } // 위아래로 움직이면 목록 넘기기
+    if (Math.abs(dx) < 10) return;
+    swipe.active = true;
+    swipe.li.classList.add('swiping');
+  }
+  swipe.dx = dx;
+  swipe.li.querySelector('.row-main').style.transform = `translateX(${Math.min(0, Math.max(SWIPE_OPEN - 20, swipe.base + dx))}px)`;
+});
+const endSwipe = () => {
+  if (!swipe) return;
+  const { li, active, base, dx } = swipe;
+  swipe = null;
+  if (!active) return;
+  li.classList.remove('swiping');
+  swipedAt = performance.now();
+  const open = base + dx < SWIPE_OPEN / 2;
+  li.classList.toggle('open', open);
+  li.querySelector('.row-main').style.transform = open ? `translateX(${SWIPE_OPEN}px)` : '';
+};
+$('#watch-list').addEventListener('pointerup', endSwipe);
+$('#watch-list').addEventListener('pointercancel', endSwipe);
 
 // 종목 로고 자리: 트레이딩뷰처럼 동그란 표시 (로고 그림 대신 이름 첫 글자와 종목마다 다른 색)
 function coinLogo(coin, cls = '') {
@@ -1545,16 +1666,26 @@ function renderSymbolBtn() {
   $('#symbol-logo').outerHTML = coinLogo(settings.coin, 'app-only').replace('<span class="coin-logo', '<span id="symbol-logo" class="coin-logo');
 }
 $('#watch-list').addEventListener('click', (e) => {
-  const li = e.target.closest('li');
-  if (li) selectCoin(li.dataset.coin);
+  const del = e.target.closest('[data-del]');
+  if (del) return toggleWatch(del.dataset.del);
+  // 방금 밀었거나, 삭제 버튼이 열려 있던 줄을 누르면 닫기만
+  if (performance.now() - swipedAt < 300) return;
+  const li = e.target.closest('li[data-coin]');
+  if (!li) return;
+  if (li.classList.contains('open')) return closeSwipes();
+  closeSwipes();
+  selectCoin(li.dataset.coin);
 });
 
 let watchRender = 0;
 function startTickers() {
   unsubscribeTickers();
+  unsubscribeTickers = () => {};
   tickers.clear();
   renderWatchlist();
-  unsubscribeTickers = feed.subscribeTickers(feed.coins, (t) => {
+  const coins = watchCoins();
+  if (!coins.length) return;
+  unsubscribeTickers = feed.subscribeTickers(coins, (t) => {
     tickers.set(t.coin, t);
     // 틱마다 다시 그리지 않고 프레임당 한 번만.
     watchRender ||= requestAnimationFrame(() => { watchRender = 0; renderWatchlist(); if (t.coin === settings.coin) renderDetails(); });
@@ -1821,7 +1952,7 @@ for (const b of document.querySelectorAll('.tabbar [data-tab]')) {
 }
 appMedia.addEventListener('change', () => { applyPanels(); closePopover(); updateLegend(); });
 
-$('#watch-search').innerHTML = icon('search');
+$('#watch-search').innerHTML = icon('plus');
 $('#watch-search').addEventListener('click', () => openSearch());
 $('#watch-source').addEventListener('change', (e) => switchFeed(e.target.value));
 
@@ -1924,6 +2055,18 @@ createMainSeries();
 buildIndicators();
 startTickers();
 loadSymbol();
+
+// 대화 창(검색·지표·설정): 휴대폰에서는 손잡이를 끌어 내리거나, 바깥 어두운 곳을 누르면 닫힌다
+for (const d of document.querySelectorAll('dialog.search')) {
+  d.prepend(sheetGrip(d, () => d.close()));
+  d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+}
+// 아이폰 Safari는 확대 금지 설정을 무시해서, 두 손가락 확대 동작을 직접 막는다 (차트 확대는 차트가 따로 처리)
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+// 휴대폰 가로: 차트 화면으로
+const applyLandscape = () => { if (landscapeMedia.matches && settings.tab !== 'chart') setTab('chart'); };
+landscapeMedia.addEventListener('change', applyLandscape);
+applyLandscape();
 
 // 브라우저 확인 스크립트(e2e)에서 상태를 읽는 통로
 window.__rea = { drawings, chart };

@@ -338,21 +338,56 @@ button, select, input { font: inherit; color: inherit; }
   flex-direction: column;
   flex: none;
 }
-.watch-head { padding: 12px 12px 8px; font-weight: 600; }
-.watch-cols, #watch-list li {
+.watch-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px 12px; font-weight: 600; }
+#watch-title { flex: 1; }
+.watch-cols, #watch-list .row-main {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 1.1fr) 58px;
   gap: 6px;
   padding: 6px 12px;
   font-size: 12px;
 }
-#watch-list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#watch-list .row-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .watch-cols { color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border); }
-.watch-cols span:not(:first-child), #watch-list li span:not(:first-child) { text-align: right; }
+.watch-cols span:not(:first-child), #watch-list .row-main > span:not(:first-child) { text-align: right; }
 #watch-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 120px; }
-#watch-list li { cursor: pointer; font-variant-numeric: tabular-nums; }
-#watch-list li:hover { background: var(--hover); }
-#watch-list li.active { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+#watch-list li { position: relative; overflow: hidden; cursor: pointer; font-variant-numeric: tabular-nums; }
+#watch-list .row-main { position: relative; z-index: 1; background: var(--panel); transition: transform 0.18s ease; }
+#watch-list li.swiping .row-main { transition: none; }
+#watch-list li.empty { padding: 24px 16px; color: var(--muted); cursor: default; text-align: center; }
+@media (hover: hover) {
+  #watch-list li:hover .row-main { background: var(--hover); }
+  /* 컴퓨터: 줄에 마우스를 올리면 오른쪽 끝에 빼기(×) 버튼 (트레이딩뷰 관심 목록처럼) */
+  #watch-list li:hover .row-del { display: grid; }
+}
+#watch-list li.active .row-main { background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+.row-del {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 6px;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: -11px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text);
+  cursor: pointer;
+}
+/* 값이 바뀌면 트레이딩뷰처럼 잠깐 초록·빨강으로 반짝 */
+@keyframes flash-up { from { background: color-mix(in srgb, var(--up) 35%, transparent); } }
+@keyframes flash-down { from { background: color-mix(in srgb, var(--down) 35%, transparent); } }
+.flash-up { animation: flash-up 0.7s ease-out; border-radius: 3px; }
+.flash-down { animation: flash-down 0.7s ease-out; border-radius: 3px; }
+.watch-star { display: grid; place-items: center; flex: none; width: 32px; height: 32px; margin: -6px -8px -6px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.watch-star.on { color: #f7a21b; }
+.watch-star.on svg { fill: currentColor; }
+#search-results li { align-items: center; gap: 10px; }
+#search-results li .s-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#search-results li .s-main small { color: var(--muted); font-size: 11px; }
 #watch-list li .sym { font-weight: 600; }
 .up { color: var(--up); }
 .down { color: var(--down); }
@@ -469,7 +504,7 @@ button, select, input { font: inherit; color: inherit; }
 .link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 11px; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-height: 520px) {
   .watchlist, .rail { display: none; }
   #indicator-btn .label, .source { display: none; }
   .feed-wrap { display: none; }
@@ -618,12 +653,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .credit a { color: var(--muted); }
 
 /* ---------- 휴대폰 앱 화면 (트레이딩뷰 앱처럼) ---------- */
-.app-only, .tabbar, .menu-screen { display: none; }
+.app-only, .tabbar, .menu-screen, .sheet-grip { display: none; }
 .sheet-backdrop { position: fixed; inset: 0; z-index: 29; background: rgb(0 0 0 / 0.45); }
 .interval-btn { font-weight: 600; gap: 4px; padding: 0 8px; }
 .topbar { height: calc(46px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-height: 520px) {
   .web-only { display: none !important; }
   .app-only { display: revert; }
   .btn.app-only, .interval-btn.app-only { display: inline-flex; }
@@ -679,19 +714,37 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
     padding: calc(10px + env(safe-area-inset-top)) 12px 10px 16px;
     border-bottom: 1px solid var(--border);
   }
-  #watch-title { flex: 1; font-size: 22px; font-weight: 700; }
+  #watch-title { font-size: 22px; font-weight: 700; }
   .watch-head .select { color: var(--muted); font-size: 13px; padding: 0 6px; max-width: 45%; }
   .watch-cols, .details { display: none; }
-  #watch-list li {
+  #watch-list li { border-bottom: 1px solid var(--border); touch-action: pan-y; }
+  #watch-list .row-main {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: 'sym last' 'sym pct';
     gap: 2px 12px;
     align-items: center;
     padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
     font-size: 15px;
   }
-  #watch-list li.active { background: transparent; }
+  #watch-list li.active .row-main { background: var(--panel); }
+  /* 휴대폰: 줄을 왼쪽으로 밀면 뒤에 있던 빨간 삭제 버튼이 보인다 (트레이딩뷰 앱처럼) */
+  .row-del {
+    display: grid;
+    z-index: 0; /* 줄 아래에 숨어 있다가 밀면 보인다 */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 88px;
+    height: auto;
+    margin: 0;
+    border-radius: 0;
+    background: var(--down);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #watch-list li .row-del svg { display: none; }
+  #watch-list li .row-del::after { content: '삭제'; }
   #watch-list li .sym { grid-area: sym; gap: 12px; }
   #watch-list li .coin-logo { width: 34px; height: 34px; font-size: 15px; }
   .sym-text small { display: block; font-size: 12px; }
@@ -748,17 +801,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
     border-radius: 14px 14px 0 0;
     animation: sheet-up 0.18s ease-out;
   }
-  .popover.sheet::before {
-    content: '';
-    position: absolute;
-    top: 7px;
-    left: 50%;
-    width: 36px;
-    height: 4px;
-    margin-left: -18px;
-    border-radius: 2px;
-    background: var(--border);
-  }
+  /* 위쪽 손잡이를 아래로 끌면 닫힌다 */
+  .sheet-grip { display: block; position: sticky; top: -18px; z-index: 1; height: 26px; margin: -18px 0 -8px; touch-action: none; cursor: grab; }
+  .sheet-grip::before { content: ''; position: absolute; top: 9px; left: 50%; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: var(--border); }
+  dialog.search > .sheet-grip { position: relative; top: 0; margin: 0 0 -10px; }
   .popover.sheet .pop-item { min-height: 48px; padding: 0 20px; font-size: 15px; }
   .popover.sheet .pop-title { padding: 10px 20px 4px; font-size: 12px; }
   .popover.sheet .star { display: none; } /* 휴대폰에는 즐겨찾기 줄이 없다 */
@@ -779,3 +825,28 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   #search-results li { padding: 12px 16px; font-size: 15px; }
 }
 @keyframes sheet-up { from { transform: translateY(40%); } to { transform: none; } }
+
+
+/* ---------- 앱처럼 느껴지게: 화면 확대·튕김·글자 선택·길게 눌러 뜨는 메뉴 막기, 누를 때 반응 ---------- */
+html { touch-action: pan-x pan-y; }
+html, body { overscroll-behavior: none; }
+body { -webkit-tap-highlight-color: transparent; }
+button, select, .tabbar, .statusbar, .topbar, .menu-row { touch-action: manipulation; }
+#watch-list li { touch-action: pan-y; } /* 가로로 밀기는 직접 처리 (삭제 버튼) */
+@media (hover: none) {
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input, textarea { -webkit-user-select: text; user-select: text; }
+  .btn:active:not(:disabled), .scale-btn:active:not(:disabled), .ranges button:active, .tool:active,
+  .pop-item:active, .fly-item:active, .menu-row:not(.static):active, .tabbar button:active,
+  #search-results li:active, .study-add:active { background: var(--hover); }
+  #watch-list li:active .row-main { background: var(--hover); }
+  .tabbar button:active .tab-icon { transform: scale(0.9); }
+}
+
+/* 휴대폰을 가로로 돌리면 트레이딩뷰 앱처럼 차트만 크게 (아래 탭 숨김) */
+@media (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
+  .tabbar { display: none !important; }
+  .topbar { height: calc(40px + env(safe-area-inset-top)); }
+  .statusbar { height: 34px; }
+  .layout { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
