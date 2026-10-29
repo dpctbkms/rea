@@ -509,3 +509,29 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .coord-name { padding-bottom: 9px; color: var(--muted); font-size: 12px; }
 .muted.small { font-size: 12px; margin: 0; }
 @media (max-width: 480px) { .coord-row { grid-template-columns: 1fr; } .coord-name { padding: 0; } }
+
+/* 떠 있는 막대: 손잡이로 끌어 옮기기 */
+.draw-bar.placed { transform: none; }
+.bar-grip { display: grid; place-items: center; width: 16px; height: 28px; color: var(--muted); cursor: grab; touch-action: none; }
+.bar-grip:active { cursor: grabbing; }
+.fib-levels { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+
+/* 차트 위 글자 입력 */
+.text-editor {
+  position: absolute;
+  z-index: 9;
+  margin: -3px 0 0 -4px;
+  padding: 2px 4px;
+  border: 1px dashed var(--accent);
+  border-radius: 2px;
+  background: transparent;
+  font-weight: 600;
+  line-height: 1.3;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  white-space: pre;
+}
+.eraser-cursor .chart, .eraser-cursor .chart * { cursor: cell !important; }
+/* 그리는 동안에는 범례 버튼이 터치·클릭을 가로채지 않게 (차트 어디를 끌어도 십자선이 움직이도록) */
+.chart-wrap.drawing .ind-actions { pointer-events: none; opacity: 0.25; }

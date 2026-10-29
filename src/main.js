@@ -5,7 +5,7 @@ import {
 import { FEEDS, INTERVALS } from './feeds/index.js';
 import { heikinAshi } from './indicators.js';
 import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
-import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS } from './drawings.js';
+import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS, FIB_LEVELS } from './drawings.js';
 import { BarCountdown } from './countdown.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -93,7 +93,7 @@ applyTheme();
 
 function applyTheme() {
   const text = css('--text'), grid = css('--grid'), border = css('--border'), c = settings.chart;
-  const lines = settings.cursorMode === 'cross';
+  const lines = settings.cursorMode === 'cross' || settings.cursorMode === 'eraser';
   chart.applyOptions({
     layout: {
       background: { type: ColorType.Solid, color: c.bgColor || css('--bg') },
@@ -108,6 +108,7 @@ function applyTheme() {
     },
   });
   $('.chart-wrap').classList.toggle('arrow-cursor', settings.cursorMode === 'arrow');
+  $('.chart-wrap').classList.toggle('eraser-cursor', settings.cursorMode === 'eraser');
 }
 
 function applyScale() {
@@ -164,6 +165,7 @@ function createMainSeries() {
       mainSeries = chart.addSeries(CandlestickSeries, { ...common, ...candle });
   }
   mainSeries.attachPrimitive(countdown);
+  drawings.handleFill = c.bgColor || css('--bg'); // 손잡이 안쪽은 차트 배경색
   drawings.attach(mainSeries);
 }
 
@@ -412,6 +414,27 @@ const ICONS = {
   long: '<rect x="3" y="3" width="14" height="7" rx="1"/><path d="M3 13h14M3 17h14" stroke-dasharray="2 2"/>',
   short: '<path d="M3 3h14M3 7h14" stroke-dasharray="2 2"/><rect x="3" y="10" width="14" height="7" rx="1"/>',
   text: '<path d="M4 5V3h12v2M10 3v14M7 17h6"/>',
+  eraser: '<path d="M8 17h9M3.5 12.5l7-7a1.5 1.5 0 012 0l3 3a1.5 1.5 0 010 2L10 16H7z"/><path d="M7 9l5 5"/>',
+  infoline: '<path d="M3 16L13 6"/><circle cx="3" cy="16" r="1.5"/><circle cx="13" cy="6" r="1.5"/><rect x="11" y="11" width="7" height="6" rx="1"/>',
+  extended: '<path d="M1 18L19 2"/><circle cx="7" cy="12.7" r="1.5"/><circle cx="13" cy="7.3" r="1.5"/>',
+  trendangle: '<path d="M3 16L16 5M3 16h14"/><path d="M10 16a7 7 0 00-1.6-4.4"/>',
+  regression: '<path d="M2 14L18 6"/><path d="M2 10l16-8M2 18l16-8" stroke-dasharray="2 2"/>',
+  fibext: '<path d="M3 4h14M3 9h14M3 14h14"/><path d="M3 18l4-6 4 3" stroke-dasharray="2 2"/>',
+  fibtime: '<path d="M3 3v14M6 3v14M9 3v14M14 3v14"/>',
+  daterange: '<path d="M3 3v14M17 3v14M5 10h10M12 7l3 3-3 3"/>',
+  pricerange: '<path d="M3 3h14M3 17h14M10 5v10M7 12l3 3 3-3"/>',
+  brush: '<path d="M3 15c3 0 3-4 6-4s2 4 5 4 3-3 3-3"/>',
+  highlighter: '<path d="M4 16l2-6 7-7 3 3-7 7z"/><path d="M3 18h7" stroke-width="3"/>',
+  circle: '<circle cx="10" cy="10" r="7"/>',
+  triangle: '<path d="M10 3l7 13H3z"/>',
+  path: '<path d="M3 16l4-8 5 5 4-9"/><path d="M13 4h3v3"/>',
+  polyline: '<path d="M3 15l3-10 6 3 5 8z"/>',
+  pricelabel: '<rect x="3" y="4" width="14" height="8" rx="2"/><path d="M8 12l2 4 2-4"/>',
+  arrowmark: '<path d="M4 16L16 4M10 4h6v6"/>',
+  arrowup: '<path d="M10 3l6 7h-4v7H8v-7H4z"/>',
+  arrowdown: '<path d="M10 17l6-7h-4V3H8v7H4z"/>',
+  more: '<circle cx="5" cy="10" r="1.3" fill="currentColor"/><circle cx="10" cy="10" r="1.3" fill="currentColor"/><circle cx="15" cy="10" r="1.3" fill="currentColor"/>',
+  grip: '<circle cx="8" cy="5" r="1.2" fill="currentColor"/><circle cx="12" cy="5" r="1.2" fill="currentColor"/><circle cx="8" cy="10" r="1.2" fill="currentColor"/><circle cx="12" cy="10" r="1.2" fill="currentColor"/><circle cx="8" cy="15" r="1.2" fill="currentColor"/><circle cx="12" cy="15" r="1.2" fill="currentColor"/>',
   magnet: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3"/>',
   off: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3M3 17L17 3"/>',
   weak: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3"/>',
@@ -448,19 +471,28 @@ const CURSORS = [
   { id: 'cross', label: '십자선' },
   { id: 'dot', label: '점' },
   { id: 'arrow', label: '화살표' },
+  { id: 'eraser', label: '지우개' },
 ];
+// 트레이딩뷰 왼쪽 도구 막대와 같은 묶음·순서
 const TOOL_GROUPS = [
   { id: 'cursor', items: CURSORS.map((c) => c.id) },
-  { id: 'lines', items: ['trend', 'ray', 'hline', 'hray', 'vline', 'crossline'] },
-  { id: 'channel', items: ['channel'] },
-  { id: 'fib', items: ['fib'] },
-  { id: 'shapes', items: ['rect', 'ellipse'] },
-  { id: 'text', items: ['text'] },
-  { id: 'forecast', items: ['long', 'short', 'measure'] },
+  { id: 'lines', label: '추세선 도구', items: ['trend', 'ray', 'infoline', 'extended', 'trendangle', 'hline', 'hray', 'vline', 'crossline', 'channel', 'regression'] },
+  { id: 'fib', label: '피보나치 도구', items: ['fib', 'fibext', 'fibtime'] },
+  { id: 'forecast', label: '예측·측정 도구', items: ['long', 'short', 'daterange', 'pricerange', 'measure'] },
+  { id: 'shapes', label: '기하 도형', items: ['brush', 'highlighter', 'rect', 'circle', 'ellipse', 'triangle', 'path', 'polyline'] },
+  { id: 'annotation', label: '주석 도구', items: ['text', 'pricelabel', 'arrow', 'arrowup', 'arrowdown'] },
 ];
+// 그리기 도구 'arrow'와 커서 'arrow'가 같은 이름이라 아이콘을 구분한다
+const toolIcon = (groupId, id) => icon(groupId === 'annotation' && id === 'arrow' ? 'arrowmark' : id);
 const MAGNETS = { weak: '약한 자석: 가까울 때만 시가·고가·저가·종가에 붙임', strong: '강한 자석: 항상 가장 가까운 시가·고가·저가·종가에 붙임' };
+const REMOVE_ITEMS = [
+  { id: 'remove-drawings', label: '그림 지우기' },
+  { id: 'remove-studies', label: '지표 지우기' },
+  { id: 'remove-all', label: '그림과 지표 지우기' },
+];
 const MAGNET_ITEMS = [{ id: 'weak', label: '약한 자석' }, { id: 'strong', label: '강한 자석' }, { id: 'off', label: '자석 끄기' }];
-const toolInfo = (id) => TOOLS.find((t) => t.id === id) ?? CURSORS.find((c) => c.id === id) ?? MAGNET_ITEMS.find((m) => m.id === id);
+const toolInfo = (id, groupId) => (groupId === 'cursor' ? CURSORS.find((c) => c.id === id) : null)
+  ?? TOOLS.find((t) => t.id === id) ?? CURSORS.find((c) => c.id === id) ?? MAGNET_ITEMS.find((m) => m.id === id) ?? REMOVE_ITEMS.find((m) => m.id === id);
 const altKey = (key) => (key ? `Alt+${key}` : '');
 
 const drawings = new DrawingManager({
@@ -473,7 +505,8 @@ const drawings = new DrawingManager({
     const date = `${String(d.getFullYear()).slice(2)}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
     return stepSeconds() >= 86400 ? date : `${date} ${two(d.getHours())}:${two(d.getMinutes())}`;
   },
-  onTextCreated: () => openDrawingSettings('text'),
+  formatVolume: (v) => fmtVol(v),
+  onTextCreated: (d) => openTextEditor(d),
   onChange: (list) => {
     if (list.length) settings.drawings[lineKey()] = list;
     else delete settings.drawings[lineKey()];
@@ -493,18 +526,18 @@ function renderTools() {
   $('.tools').innerHTML = [
     ...TOOL_GROUPS.map((g) => {
       const current = groupCurrent(g);
-      const info = toolInfo(current);
+      const info = toolInfo(current, g.id);
       const isActive = g.id === 'cursor' ? tool === 'cursor' : tool === current;
-      const caret = g.items.length > 1 ? `<span class="caret" data-flyout="${g.id}" title="더 보기"></span>` : '';
+      const caret = g.items.length > 1 ? `<span class="caret" data-flyout="${g.id}" title="${g.label ?? '더 보기'}"></span>` : '';
       const key = altKey(info.key);
-      return `<button class="tool ${isActive ? 'active' : ''}" data-group="${g.id}" title="${info.label}${key ? ` (${key})` : ''}" aria-label="${info.label}">${icon(current)}${caret}</button>`;
+      return `<button class="tool ${isActive ? 'active' : ''}" data-group="${g.id}" title="${info.label}${key ? ` (${key})` : ''}" aria-label="${info.label}">${toolIcon(g.id, current)}${caret}</button>`;
     }),
     '<div class="tools-sep"></div>',
     `<button class="tool ${drawings.stay ? 'active' : ''}" data-action="stay" title="드로잉 모드 유지: 다 그려도 같은 도구로 계속 그림" aria-label="드로잉 모드 유지" aria-pressed="${drawings.stay}">${icon('stay')}</button>`,
     `<button class="tool ${drawings.magnet !== 'off' ? 'active' : ''}" data-action="magnet" title="${MAGNETS[settings.magnetMode]} (그리는 중 Ctrl을 누르면 잠깐 반대로)" aria-label="자석" aria-pressed="${drawings.magnet !== 'off'}">${icon(settings.magnetMode)}<span class="caret" data-flyout="magnet" title="자석 방식"></span></button>`,
     `<button class="tool ${drawings.locked ? 'active' : ''}" data-action="lock" title="${drawings.locked ? '그림 잠금 풀기' : '그림 모두 잠그기'}" aria-label="잠금" aria-pressed="${drawings.locked}">${icon(drawings.locked ? 'lock' : 'unlock')}</button>`,
     `<button class="tool ${drawings.hidden ? 'active' : ''}" data-action="hide" title="${drawings.hidden ? '그림 보이기' : '그림 모두 숨기기'}" aria-label="숨기기" aria-pressed="${drawings.hidden}">${icon(drawings.hidden ? 'eyeOff' : 'eye')}</button>`,
-    `<button class="tool" data-action="clear" title="이 종목의 그림 모두 지우기" aria-label="모두 지우기" ${drawings.drawings.length ? '' : 'disabled'}>${icon('clear')}</button>`,
+    `<button class="tool" data-action="clear" title="그림 지우기" aria-label="지우기" aria-haspopup="menu">${icon('clear')}<span class="caret" data-flyout="remove" title="지우기 메뉴"></span></button>`,
   ].join('');
   $('#undo-btn').disabled = !drawings.canUndo;
   $('#redo-btn').disabled = !drawings.canRedo;
@@ -512,9 +545,13 @@ function renderTools() {
   const t = TOOLS.find((x) => x.id === tool);
   $('#draw-hint').hidden = tool === 'cursor';
   if (t) {
-    $('#draw-hint').textContent = t.points === 1 ? `${t.label}: 차트를 누르세요 · Esc 취소`
+    const touch = matchMedia('(hover: none)').matches;
+    $('#draw-hint').textContent = t.points === 'free' ? `${t.label}: 누른 채 그으세요`
+      : touch ? `${t.label}: 끌어서 십자선을 옮기고, 탭해서 점을 찍으세요`
+      : t.points === 'multi' ? `${t.label}: 점을 차례로 찍고, 마지막 점을 한 번 더 누르거나 Enter로 끝내기`
+      : t.points === 1 ? `${t.label}: 차트를 누르세요 · Esc 취소`
       : t.points === 2 ? `${t.label}: 누른 채 끌거나 두 곳을 차례로 누르세요 · Shift로 각도 고정 · Esc 취소`
-      : `${t.label}: 두 점을 찍은 뒤 폭을 정할 곳을 누르세요 · Esc 취소`;
+      : `${t.label}: ${t.points}곳을 차례로 누르세요 · Esc 취소`;
   }
 }
 
@@ -531,16 +568,18 @@ function pickTool(groupId, id) {
 }
 
 function openFlyout(groupId, anchor) {
-  const g = groupId === 'magnet' ? { id: 'magnet', items: MAGNET_ITEMS.map((m) => m.id) } : TOOL_GROUPS.find((x) => x.id === groupId);
+  const g = groupId === 'magnet' ? { id: 'magnet', items: MAGNET_ITEMS.map((m) => m.id) }
+    : groupId === 'remove' ? { id: 'remove', items: REMOVE_ITEMS.map((m) => m.id) }
+    : TOOL_GROUPS.find((x) => x.id === groupId);
   const fly = $('#flyout');
   const current = groupId === 'magnet' ? (drawings.magnet === 'off' ? null : drawings.magnet) : groupCurrent(g);
-  fly.innerHTML = g.items.map((id) => {
-    const info = toolInfo(id);
+  fly.innerHTML = (g.label ? `<div class="pop-title">${g.label}</div>` : '') + g.items.map((id) => {
+    const info = toolInfo(id, g.id);
     return `<button class="fly-item ${id === current ? 'active' : ''}" data-group="${g.id}" data-pick="${id}" role="menuitem">
-      ${icon(id)}<span>${info.label}</span><span class="fly-key">${altKey(info.key)}</span></button>`;
+      ${g.id === 'remove' ? '' : toolIcon(g.id, id)}<span>${info.label}</span><span class="fly-key">${altKey(info.key)}</span></button>`;
   }).join('');
   const r = anchor.getBoundingClientRect();
-  fly.style.top = `${Math.min(r.top, innerHeight - g.items.length * 38 - 12)}px`;
+  fly.style.top = `${Math.max(8, Math.min(r.top, innerHeight - g.items.length * 36 - 40))}px`;
   fly.style.left = `${r.right + 4}px`;
   fly.hidden = false;
   fly.dataset.group = groupId;
@@ -569,13 +608,22 @@ $('.tools').addEventListener('click', (e) => {
   if (action === 'stay') { drawings.stay = !drawings.stay; settings.stayDrawing = drawings.stay; save(); renderTools(); }
   if (action === 'lock') { drawings.locked = !drawings.locked; drawings.select(null); renderTools(); }
   if (action === 'hide') { drawings.hidden = !drawings.hidden; drawings.select(null); drawings.update(); renderTools(); }
-  if (action === 'clear') drawings.clear();
+  if (action === 'clear') {
+    // 휴대폰에서는 삼각형을 누를 수 없으니 메뉴를 연다
+    if (matchMedia('(hover: none)').matches) return openFlyout('remove', btn);
+    drawings.clear();
+  }
 });
 $('#flyout').addEventListener('click', (e) => {
   const item = e.target.closest('[data-pick]');
   if (!item) return;
   closeFlyout();
   if (item.dataset.group === 'magnet') return setMagnet(item.dataset.pick);
+  if (item.dataset.group === 'remove') {
+    if (item.dataset.pick !== 'remove-studies') drawings.clear();
+    if (item.dataset.pick !== 'remove-drawings') { settings.indicators = []; saveStudies(); }
+    return;
+  }
   pickTool(item.dataset.group, item.dataset.pick);
 });
 
@@ -592,7 +640,7 @@ document.addEventListener('pointerdown', (e) => {
 
 // 선택한 도형의 떠 있는 도구 막대: 색, 선 두께, 선 모양, 설정, 잠금, 삭제
 const LINE_STYLE_LABELS = { solid: '실선', dashed: '파선', dotted: '점선' };
-const HAS_LINE = (d) => !['text', 'measure', 'long', 'short'].includes(d.type);
+const HAS_LINE = (d) => !['text', 'measure', 'long', 'short', 'pricelabel', 'arrowup', 'arrowdown', 'daterange', 'pricerange'].includes(d.type);
 const lineStyleSvg = (style, width = 2) => `<svg width="28" height="10" aria-hidden="true"><line x1="2" y1="5" x2="26" y2="5" stroke="currentColor" stroke-width="${width}" stroke-dasharray="${(LINE_STYLES[style] ?? []).join(' ')}" stroke-linecap="round"/></svg>`;
 
 function renderSelectionBar() {
@@ -601,15 +649,42 @@ function renderSelectionBar() {
   bar.hidden = !d;
   if (!d) return;
   const count = drawings.selection.size;
-  const label = count > 1 ? `${count}개 선택` : TOOLS.find((t) => t.id === d.type).label;
-  bar.innerHTML = `<span class="draw-bar-label">${label}</span>`
+  const label = count > 1 ? `${count}개 선택` : TOOLS.find((t) => t.id === d.type)?.label ?? '';
+  placeDrawBar();
+  bar.innerHTML = `<span class="bar-grip" title="끌어서 옮기기" aria-hidden="true">${icon('grip', 16)}</span><span class="draw-bar-label">${label}</span>`
     + (d.type === 'measure' ? '' : `<button class="bar-btn" data-action="color" title="색" aria-label="색"><span class="color-dot" style="--c:${d.color}"></span></button>`)
     + (HAS_LINE(d) ? `<button class="bar-btn" data-action="width" title="선 두께">${lineStyleSvg('solid', d.width ?? 2)}<span>${d.width ?? 2}px</span></button>
       <button class="bar-btn" data-action="style" title="선 모양">${lineStyleSvg(d.lineStyle ?? 'solid')}</button>` : '')
     + `<button class="bar-btn" data-action="settings" title="설정 (더블클릭)" aria-label="설정">${icon('gear', 16)}</button>
       <button class="bar-btn ${d.locked ? 'on' : ''}" data-action="lock" title="${d.locked ? '잠금 풀기' : '잠그기'}" aria-label="잠금">${icon(d.locked ? 'lock' : 'unlock', 16)}</button>
-      <button class="bar-btn danger" data-action="delete" title="삭제 (Delete)" aria-label="삭제">${icon('clear', 16)}</button>`;
+      <button class="bar-btn danger" data-action="delete" title="삭제 (Delete)" aria-label="삭제">${icon('clear', 16)}</button>
+      <button class="bar-btn" data-action="more" title="더 보기" aria-label="더 보기" aria-haspopup="menu">${icon('more', 16)}</button>`;
 }
+
+// 떠 있는 막대는 손잡이로 끌어 옮길 수 있고, 위치를 기억한다
+function placeDrawBar() {
+  const bar = $('#draw-bar');
+  const pos = settings.drawBarPos;
+  bar.classList.toggle('placed', !!pos);
+  bar.style.left = pos ? `${pos.x}px` : '';
+  bar.style.top = pos ? `${pos.y}px` : '';
+}
+$('#draw-bar').addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('.bar-grip')) return;
+  e.preventDefault();
+  const bar = $('#draw-bar'), wrap = $('.chart-wrap').getBoundingClientRect(), r = bar.getBoundingClientRect();
+  const dx = e.clientX - r.left, dy = e.clientY - r.top;
+  const move = (ev) => {
+    settings.drawBarPos = {
+      x: Math.max(0, Math.min(ev.clientX - wrap.left - dx, wrap.width - r.width)),
+      y: Math.max(0, Math.min(ev.clientY - wrap.top - dy, wrap.height - r.height)),
+    };
+    placeDrawBar();
+  };
+  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); save(); };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+});
 
 $('#draw-bar').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
@@ -631,7 +706,64 @@ $('#draw-bar').addEventListener('click', (e) => {
   if (act === 'settings') openDrawingSettings();
   if (act === 'lock') drawings.updateSelected({ locked: !d.locked });
   if (act === 'delete') drawings.removeSelected();
+  if (act === 'more') {
+    const items = [['duplicate', '복제'], ['copy', '복사'], ['sep'], ['front', '맨 앞으로'], ['back', '맨 뒤로'], ['sep'], ['settings', '설정…']];
+    openPopover(btn, items.map(([v, text]) => (v === 'sep' ? '<div class="pop-sep"></div>' : `<div class="pop-item" data-value="${v}"><span>${text}</span></div>`)).join(''), (v) => {
+      if (v === 'duplicate') drawings.duplicateSelected();
+      if (v === 'copy') drawings.copySelected();
+      if (v === 'front') drawings.reorderSelected(true);
+      if (v === 'back') drawings.reorderSelected(false);
+      if (v === 'settings') openDrawingSettings();
+    });
+  }
 });
+
+// ---------- 차트 위에서 바로 글자 입력 (텍스트 도구) ----------
+const textEditor = $('#text-editor');
+let editingText = null;
+function openTextEditor(d) {
+  const px = drawings.pointToPixel(d.points[0]);
+  if (!px) return;
+  editingText = d.id;
+  d.editing = true;
+  const live = drawings.drawings.find((x) => x.id === d.id);
+  if (live) live.editing = true;
+  drawings.update();
+  const fs = d.fontSize ?? 14;
+  Object.assign(textEditor.style, { left: `${px.x}px`, top: `${px.y}px`, fontSize: `${fs}px`, color: d.color });
+  textEditor.value = d.text ?? '';
+  textEditor.hidden = false;
+  autosizeText();
+  requestAnimationFrame(() => textEditor.focus());
+}
+function autosizeText() {
+  textEditor.style.width = '40px';
+  textEditor.style.height = 'auto';
+  textEditor.style.width = `${Math.max(60, textEditor.scrollWidth + 8)}px`;
+  textEditor.style.height = `${textEditor.scrollHeight}px`;
+}
+function closeTextEditor(commit) {
+  if (!editingText) return;
+  const id = editingText;
+  editingText = null;
+  textEditor.hidden = true;
+  const d = drawings.drawings.find((x) => x.id === id);
+  if (!d) return;
+  delete d.editing;
+  const text = textEditor.value.trim();
+  drawings.select(id);
+  // 빈 글자로 끝내면 트레이딩뷰처럼 지운다
+  if (!text || (!commit && !d.text)) return drawings.removeSelected();
+  if (commit && text !== d.text) drawings.updateSelected({ text }, true);
+  else drawings.update();
+}
+textEditor.addEventListener('input', autosizeText);
+textEditor.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeTextEditor(true); }
+  if (e.key === 'Escape') { e.preventDefault(); closeTextEditor(false); }
+});
+textEditor.addEventListener('blur', () => closeTextEditor(true));
 
 // 도형 설정 창 (더블클릭): 스타일 · 텍스트 · 좌표 · 보이기
 const drawingDialog = $('#drawing-settings');
@@ -668,6 +800,8 @@ function openDrawingSettings(tab = 'style') {
         ${HAS_LINE(d) ? `<label class="field" for="ds-width"><span>선 두께</span><select id="ds-width" name="width">${[1, 2, 3, 4].map((w) => `<option value="${w}" ${w === (d.width ?? 2) ? 'selected' : ''}>${w}px</option>`).join('')}</select></label>
         <label class="field" for="ds-lineStyle"><span>선 모양</span><select id="ds-lineStyle" name="lineStyle">${Object.keys(LINE_STYLES).map((st) => `<option value="${st}" ${st === (d.lineStyle ?? 'solid') ? 'selected' : ''}>${LINE_STYLE_LABELS[st]}</option>`).join('')}</select></label>` : ''}
       </div>
+      ${d.type === 'fib' || d.type === 'fibext' ? `<h3>레벨</h3><div class="fields fib-levels">${FIB_LEVELS.map(([l, col]) => check(`lvl-${String(l).replace('.', '_')}`, `<span style="color:${col}">${l}</span>`, (d.levels ?? FIB_LEVELS.map(([x]) => x)).includes(l))).join('')}</div>
+      <h3>연장</h3><div class="fields">${check('extendLeft', '왼쪽으로 연장', d.extendLeft)}${check('extendRight', '오른쪽으로 연장', d.extendRight)}</div>` : ''}
       ${isLine ? `<h3>연장·끝 모양</h3><div class="fields">${check('extendLeft', '왼쪽으로 연장', d.extendLeft)}${check('extendRight', '오른쪽으로 연장', d.extendRight ?? d.type === 'ray')}${check('arrowLeft', '시작점 화살표', d.arrowLeft)}${check('arrowRight', '끝점 화살표', d.arrowRight)}</div>
       <h3>통계</h3><div class="fields">${STATS.map(([k, t]) => check(`stat-${k}`, t, d.stats?.includes(k))).join('')}</div>` : ''}
       <h3>기타</h3><div class="fields">${check('locked', '잠금 (옮기지 않기)', d.locked)}</div>
@@ -709,6 +843,10 @@ $('#drawing-settings-form').addEventListener('submit', (e) => {
     own.text = String(f.get('text') ?? '').trim();
   }
   if (d.type === 'text') { own.text = String(f.get('text')).trim() || d.text; own.fontSize = Number(f.get('fontSize')); }
+  if (d.type === 'fib' || d.type === 'fibext') {
+    own.levels = FIB_LEVELS.map(([l]) => l).filter((l) => f.has(`lvl-${String(l).replace('.', '_')}`));
+    Object.assign(own, { extendLeft: f.has('extendLeft'), extendRight: f.has('extendRight') });
+  }
   own.points = d.points.map((pt, i) => ({
     time: f.get(`time${i}`) ? Date.parse(f.get(`time${i}`)) / 1000 : pt.time,
     price: f.get(`price${i}`) !== null && f.get(`price${i}`) !== '' ? Number(f.get(`price${i}`)) : pt.price,
@@ -733,6 +871,15 @@ const inMainPane = (pt) => pt.x >= 0 && pt.y >= 0 && pt.x <= chart.timeScale().w
 let press = null; // 누른 위치·시각 (탭 판정용)
 let lastTap = null; // 더블클릭(더블탭) 판정용
 let blockChart = false;
+// 휴대폰 그리기: 트레이딩뷰 모바일처럼 손가락을 끌면 십자선이 그만큼 움직이고, 탭하면 십자선 자리에 점을 찍는다
+let trackpad = null; // { finger: 누른 손가락 위치, cursor: 그때 십자선 위치 }
+
+function moveTouchCursor(pt) {
+  const w = chart.timeScale().width(), h = chart.panes()[0].getHeight();
+  const clamped = { x: Math.max(0, Math.min(w - 1, pt.x)), y: Math.max(0, Math.min(h - 1, pt.y)) };
+  drawings.setTouchCursor(clamped);
+  return clamped;
+}
 
 chartEl.addEventListener('pointerdown', (e) => {
   const pt = localPoint(e);
@@ -740,11 +887,27 @@ chartEl.addEventListener('pointerdown', (e) => {
   // drawing: 이 누름이 그리기였는지 (점을 찍다가 도형이 완성돼 커서로 돌아가도 탭으로 치지 않도록)
   press = { point: pt, at: performance.now(), id: e.pointerId, touch, drawing: drawings.tool !== 'cursor' };
   if (e.button !== 0) return;
+  if (editingText) return;
   if (drawings.tool !== 'cursor') {
-    if (!inMainPane(pt)) return;
+    // 휴대폰에서 십자선이 이미 있으면 차트 어디를 끌어도(눈금·아래 창 포함) 십자선을 옮긴다
+    if (!inMainPane(pt) && !(touch && drawings.touchCursor)) return;
     blockChart = true;
     lastTap = null;
-    drawings.pressDraw(pt, keysOf(e));
+    if (touch && !drawings.isFreehandTool) {
+      // 첫 터치는 그 자리에 십자선을 놓고, 이후로는 손가락이 움직인 만큼 십자선을 옮긴다
+      const cursor = drawings.touchCursor ?? moveTouchCursor(pt);
+      trackpad = { finger: pt, cursor };
+    } else {
+      drawings.pressDraw(pt, keysOf(e));
+    }
+  } else if (!touch && (drawings.quick || (e.shiftKey && !drawings.hitTest(pt)))) {
+    // Shift+클릭 빠른 측정 (다음 클릭에 고정, 그다음 클릭에 사라짐)
+    if (!inMainPane(pt)) return;
+    drawings.quickMeasureClick(pt);
+    blockChart = true;
+    press.drawing = true;
+  } else if (settings.cursorMode === 'eraser') {
+    return;
   } else if (drawings.beginDrag(pt, touch, e.ctrlKey || e.metaKey)) {
     blockChart = true;
   } else {
@@ -759,6 +922,11 @@ for (const type of ['mousedown', 'touchstart']) {
 window.addEventListener('pointermove', (e) => {
   const pt = localPoint(e);
   if (drawings.drag) return drawings.dragTo(pt, keysOf(e));
+  if (trackpad && press?.id === e.pointerId) {
+    moveTouchCursor({ x: trackpad.cursor.x + pt.x - trackpad.finger.x, y: trackpad.cursor.y + pt.y - trackpad.finger.y });
+    return;
+  }
+  if (drawings.quick) return drawings.handleMove(pt, keysOf(e));
   if (drawings.tool !== 'cursor') return drawings.handleMove(pt, keysOf(e));
   if (e.target.closest?.('#chart') && e.pointerType === 'mouse') {
     const hit = drawings.setHover(pt);
@@ -771,25 +939,55 @@ window.addEventListener('pointermove', (e) => {
 // 휴대폰에서는 브라우저 click이 오지 않아서 직접 판정한다.
 const TAP_MAX_MS = 600;
 const DOUBLE_TAP_MS = 350;
+// 휴대폰: 그리기용 탭 뒤에 브라우저가 보내는 click이, 도형이 완성된 뒤 손가락 밑의 버튼(범례 등)을 누르지 않도록
+// 같은 자리의 바로 다음 click 하나만 삼킨다
+let swallowClick = null;
 chartEl.addEventListener('pointerup', (e) => {
   const start = press;
+  if (e.pointerType !== 'mouse' && (blockChart || trackpad || start?.drawing)) {
+    swallowClick = { x: e.clientX, y: e.clientY, until: performance.now() + 400 };
+  }
   press = null;
   const pt = localPoint(e);
   blockChart = false;
   if (drawings.drag) { drawings.endDrag(); }
+  if (trackpad) {
+    // 휴대폰: 끌지 않고 뗀 탭이면 십자선 자리에 점을 찍는다
+    const tp = trackpad;
+    trackpad = null;
+    const tapped = start && Math.hypot(pt.x - start.point.x, pt.y - start.point.y) <= 10 && performance.now() - start.at <= TAP_MAX_MS;
+    if (tapped && drawings.tool !== 'cursor') drawings.handleClick(drawings.touchCursor ?? tp.cursor, {});
+    return;
+  }
   if (start?.drawing) return drawings.releaseDraw(pt, keysOf(e));
   if (!start || start.id !== e.pointerId || performance.now() - start.at > TAP_MAX_MS) return;
   if (Math.hypot(pt.x - start.point.x, pt.y - start.point.y) > (start.touch ? 10 : 5) || !inMainPane(pt)) return;
+  if (settings.cursorMode === 'eraser') {
+    // 지우개: 누른 도형을 지운다
+    const hit = drawings.hitTest(pt, start.touch ? 14 : 7);
+    if (hit) drawings.removeById(hit.drawing.id);
+    return;
+  }
   drawings.handleClick(pt, { touch: start.touch, ctrl: e.ctrlKey || e.metaKey });
   if (e.ctrlKey || e.metaKey) return;
   // 같은 도형을 빠르게 두 번 누르면 설정 창
   const id = drawings.selected?.id;
   const now = performance.now();
-  if (id && lastTap && lastTap.id === id && now - lastTap.at < DOUBLE_TAP_MS) { lastTap = null; return openDrawingSettings(); }
+  if (id && lastTap && lastTap.id === id && now - lastTap.at < DOUBLE_TAP_MS) {
+    lastTap = null;
+    // 텍스트는 차트 위에서 바로 고치고, 나머지는 설정 창
+    return drawings.selected.type === 'text' ? openTextEditor(drawings.selected) : openDrawingSettings();
+  }
   lastTap = id ? { id, at: now } : null;
 }, { capture: true });
 window.addEventListener('pointerup', () => { blockChart = false; drawings.endDrag(); });
-window.addEventListener('pointercancel', () => { blockChart = false; drawings.endDrag(); });
+
+$('.chart-wrap').addEventListener('click', (e) => {
+  const s = swallowClick;
+  swallowClick = null;
+  if (s && performance.now() < s.until && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 20) { e.stopPropagation(); e.preventDefault(); }
+}, { capture: true });
+window.addEventListener('pointercancel', () => { blockChart = false; trackpad = null; drawings.endDrag(); });
 
 // ---------- 펼침 메뉴 (툴바·오른쪽 클릭 공용) ----------
 const popover = $('#popover');
@@ -1193,6 +1391,8 @@ document.addEventListener('keydown', (e) => {
   }
   if (/^[0-9]$/.test(e.key)) { intervalBuffer = e.key; return showIntervalInput(); }
   if (e.key === '/') { e.preventDefault(); return $('#indicator-btn').click(); }
+  if (e.key === 'Enter' && drawings.finishMulti()) return e.preventDefault();
+  if (e.key === 'Escape' && editingText) return closeTextEditor(false);
   if (e.key === 'Escape') {
     // 그리던 도형이 있으면 그것만 취소, 없으면 도구를 끄고 선택을 푼다
     if (!drawings.cancelDraft()) { drawings.setTool('cursor'); drawings.select(null); }
