@@ -5,7 +5,7 @@ import {
 import { FEEDS, INTERVALS } from './feeds/index.js';
 import { heikinAshi } from './indicators.js';
 import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
-import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS, FIB_LEVELS } from './drawings.js';
+import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS, FIB_LEVELS, canAngleLock } from './drawings.js';
 import { BarCountdown } from './countdown.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -29,6 +29,8 @@ const settings = Object.assign(
     scaleMode: 'normal', // normal | log | percent
     autoScale: true,
     panelOpen: true,
+    toolsOpen: false, // 휴대폰: 왼쪽 그리기 도구 막대를 펼쳤는지 (연필 버튼)
+    legendCollapsed: false, // 지표 범례 접기
     chart: {}, // 차트 설정 (CHART_DEFAULTS 참고)
   },
   load(),
@@ -350,7 +352,11 @@ function renderLegend() {
       </span>
     </div>`;
   }).join('');
-  $('#legend').innerHTML = `<div class="row head"></div>${rows}`;
+  // 트레이딩뷰처럼 지표 범례 아래의 작은 화살표로 접고 펼친다
+  const n = settings.indicators.length;
+  const folded = settings.legendCollapsed;
+  const toggle = n ? `<button class="legend-toggle" data-act="collapse" aria-expanded="${!folded}" title="${folded ? '지표 범례 펼치기' : '지표 범례 접기'}">${folded ? `<span>지표 ${n}개</span>` : ''}<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${folded ? 'M6 8l4 4 4-4' : 'M6 12l4-4 4 4'}"/></svg></button>` : '';
+  $('#legend').innerHTML = `<div class="row head"></div><div class="study-rows" ${folded ? 'hidden' : ''}>${rows}</div>${toggle}`;
   updateLegend();
 }
 
@@ -363,9 +369,16 @@ function updateLegend() {
   const change = bar.close - prev.close;
   const cls = change >= 0 ? 'up' : 'down';
   const interval = INTERVALS.find((i) => i.id === settings.interval).label;
+  // 휴대폰: 트레이딩뷰처럼 시가·고가·저가와 지표 값은 길게 눌러 십자선을 띄웠을 때만 보인다
+  const brief = usingTouch() && innerWidth <= 768 && !crosshairPoint;
+  $('#legend').classList.toggle('values-hidden', brief);
 
   const head = $('#legend .head');
-  if (head) {
+  if (head && brief) {
+    head.innerHTML = `<span class="title">${marketLabel()} · ${interval} · ${feed.name}</span>
+      <span class="${cls}">${fmt(bar.close, digits)}</span>
+      <span class="${cls}">${change >= 0 ? '+' : ''}${fmt(change, digits)} (${change >= 0 ? '+' : ''}${((change / prev.close) * 100).toFixed(2)}%)</span>`;
+  } else if (head) {
     head.innerHTML = `<span class="title">${marketLabel()} · ${interval} · ${feed.name}</span>`
       + (settings.chart.legendOhlc ? `
       <span><span class="k">시</span><span class="${cls}">${fmt(bar.open, digits)}</span></span>
@@ -387,7 +400,19 @@ function updateLegend() {
 
 $('#legend').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-act]');
+  const row = e.target.closest('.study');
+  // 휴대폰: 지표 줄을 누르면 그 줄의 버튼(숨기기·설정·삭제)이 나타난다
+  if (!btn && row && usingTouch()) {
+    for (const r of $('#legend').querySelectorAll('.study.open')) if (r !== row) r.classList.remove('open');
+    row.classList.toggle('open');
+    return;
+  }
   if (!btn) return;
+  if (btn.dataset.act === 'collapse') {
+    settings.legendCollapsed = !settings.legendCollapsed;
+    save();
+    return renderLegend();
+  }
   const id = btn.closest('.study').dataset.id;
   const study = settings.indicators.find((x) => x.id === id);
   if (btn.dataset.act === 'toggle') { study.hidden = !study.hidden; saveStudies(); }
@@ -453,6 +478,7 @@ const ICONS = {
   camera: '<path d="M3 7h3l1.5-2h5L14 7h3v9H3z"/><circle cx="10" cy="11.5" r="3"/>',
   sun: '<circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4"/>',
   moon: '<path d="M16 12.5A7 7 0 017.5 4 7 7 0 1016 12.5z"/>',
+  pencil: '<path d="M4 16l1-4 8.3-8.3a2 2 0 012.8 2.8L7.8 15z"/><path d="M12 5.5l2.5 2.5"/>',
   panel: '<rect x="3" y="3" width="14" height="14" rx="2"/><path d="M12 3v14M14 7h1M14 10h1M14 13h1"/>',
   star: '<path d="M10 2.8l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L2.8 8.1l5-.7z"/>',
   bars: '<path d="M6 3v14M3 6h3M6 13h3M14 4v12M11 8h3M14 12h3"/>',
@@ -495,6 +521,11 @@ const toolInfo = (id, groupId) => (groupId === 'cursor' ? CURSORS.find((c) => c.
   ?? TOOLS.find((t) => t.id === id) ?? CURSORS.find((c) => c.id === id) ?? MAGNET_ITEMS.find((m) => m.id === id) ?? REMOVE_ITEMS.find((m) => m.id === id);
 const altKey = (key) => (key ? `Alt+${key}` : '');
 
+// 마지막으로 쓴 입력. 손가락이면 트레이딩뷰 모바일처럼 십자선으로 그린다.
+let lastPointer = matchMedia('(hover: none)').matches ? 'touch' : 'mouse';
+document.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType; }, true);
+const usingTouch = () => lastPointer !== 'mouse';
+
 const drawings = new DrawingManager({
   chart,
   getBars: () => bars,
@@ -514,8 +545,19 @@ const drawings = new DrawingManager({
     renderTools();
   },
   onSelect: () => renderSelectionBar(),
-  onToolChange: () => renderTools(),
+  onToolChange: () => { renderTools(); showTouchCursor(); },
+  onDraft: () => renderHint(),
 });
+
+// 휴대폰: 도구를 고르면 트레이딩뷰처럼 십자선이 바로 나타난다 (마지막 자리, 처음이면 차트 가운데).
+// 손가락을 끌면 십자선이 그만큼 움직이고, 탭하면 십자선 자리에 점을 찍는다.
+function showTouchCursor() {
+  if (drawings.tool === 'cursor' || drawings.isFreehandTool || !usingTouch()) {
+    if (drawings.touchCursor) drawings.setTouchCursor(null);
+    return;
+  }
+  if (!drawings.touchCursor) moveTouchCursor(drawings.lastTouchCursor ?? { x: chart.timeScale().width() / 2, y: chart.panes()[0].getHeight() / 2 });
+}
 
 function groupCurrent(g) {
   return g.id === 'cursor' ? settings.cursorMode : settings.toolGroups[g.id] ?? g.items[0];
@@ -542,18 +584,39 @@ function renderTools() {
   $('#undo-btn').disabled = !drawings.canUndo;
   $('#redo-btn').disabled = !drawings.canRedo;
   $('.chart-wrap').classList.toggle('drawing', tool !== 'cursor');
-  const t = TOOLS.find((x) => x.id === tool);
-  $('#draw-hint').hidden = tool === 'cursor';
-  if (t) {
-    const touch = matchMedia('(hover: none)').matches;
-    $('#draw-hint').textContent = t.points === 'free' ? `${t.label}: 누른 채 그으세요`
-      : touch ? `${t.label}: 끌어서 십자선을 옮기고, 탭해서 점을 찍으세요`
-      : t.points === 'multi' ? `${t.label}: 점을 차례로 찍고, 마지막 점을 한 번 더 누르거나 Enter로 끝내기`
-      : t.points === 1 ? `${t.label}: 차트를 누르세요 · Esc 취소`
-      : t.points === 2 ? `${t.label}: 누른 채 끌거나 두 곳을 차례로 누르세요 · Shift로 각도 고정 · Esc 취소`
-      : `${t.label}: ${t.points}곳을 차례로 누르세요 · Esc 취소`;
-  }
+  renderHint();
 }
+
+// 그리는 동안 화면 아래 안내: 몇 번째 점인지와 다음에 할 일
+const ORDINAL = ['첫', '둘째', '셋째', '넷째'];
+function renderHint() {
+  const hint = $('#draw-hint');
+  const t = TOOLS.find((x) => x.id === drawings.tool);
+  hint.hidden = !t;
+  if (!t) return;
+  const placed = drawings.draft?.points.length ?? 0;
+  const touch = usingTouch();
+  let text;
+  if (t.points === 'free') text = touch ? '손가락으로 그으세요' : '누른 채 그으세요 · Esc 취소';
+  else if (touch) {
+    // 휴대폰은 화면이 좁아 짧게: 십자선을 끌어서 옮기고, 탭하면 십자선 자리에 점
+    text = t.points === 'multi' ? `점 ${placed}개 · 끌어서 옮기고 탭${placed >= (t.id === 'polyline' ? 3 : 2) ? ' · 두 번 탭하면 끝' : ''}`
+      : t.points === 1 ? '끌어서 옮기고 탭'
+      : `${placed + 1}/${t.points} · 끌어서 옮기고 탭해서 ${ORDINAL[placed]} 점`;
+  } else {
+    text = t.points === 'multi' ? `점 ${placed}개 · 점을 차례로 찍고, 마지막 점을 한 번 더 누르거나 Enter로 끝내기 · Esc 취소`
+      : t.points === 1 ? '차트를 누르세요 · Esc 취소'
+      : placed ? `${placed + 1}/${t.points} · ${ORDINAL[placed]} 점을 누르세요 · Shift로 각도 고정 · Esc 취소`
+      : t.points === 2 ? '누른 채 끌거나 두 곳을 차례로 누르세요 · Shift로 각도 고정 · Esc 취소'
+      : `1/${t.points} · 첫 점을 누르세요 · Esc 취소`;
+  }
+  hint.innerHTML = `<span>${t.label} · ${text}</span>${touch ? '<button type="button" class="hint-cancel">취소</button>' : ''}`;
+}
+$('#draw-hint').addEventListener('click', (e) => {
+  if (!e.target.closest('.hint-cancel')) return;
+  drawings.cancelDraft();
+  drawings.setTool('cursor');
+});
 
 function pickTool(groupId, id) {
   if (groupId === 'cursor') {
@@ -655,6 +718,8 @@ function renderSelectionBar() {
     + (d.type === 'measure' ? '' : `<button class="bar-btn" data-action="color" title="색" aria-label="색"><span class="color-dot" style="--c:${d.color}"></span></button>`)
     + (HAS_LINE(d) ? `<button class="bar-btn" data-action="width" title="선 두께">${lineStyleSvg('solid', d.width ?? 2)}<span>${d.width ?? 2}px</span></button>
       <button class="bar-btn" data-action="style" title="선 모양">${lineStyleSvg(d.lineStyle ?? 'solid')}</button>` : '')
+    // 휴대폰에는 Shift가 없으니 트레이딩뷰 모바일처럼 45° 고정 버튼을 둔다
+    + (usingTouch() && canAngleLock(d.type) ? `<button class="bar-btn angle ${drawings.angleLock ? 'on' : ''}" data-action="angle" title="45° 단위로 고정" aria-pressed="${drawings.angleLock}">45°</button>` : '')
     + `<button class="bar-btn" data-action="settings" title="설정 (더블클릭)" aria-label="설정">${icon('gear', 16)}</button>
       <button class="bar-btn ${d.locked ? 'on' : ''}" data-action="lock" title="${d.locked ? '잠금 풀기' : '잠그기'}" aria-label="잠금">${icon(d.locked ? 'lock' : 'unlock', 16)}</button>
       <button class="bar-btn danger" data-action="delete" title="삭제 (Delete)" aria-label="삭제">${icon('clear', 16)}</button>
@@ -704,6 +769,7 @@ $('#draw-bar').addEventListener('click', (e) => {
       (st) => drawings.updateSelected({ lineStyle: st }));
   }
   if (act === 'settings') openDrawingSettings();
+  if (act === 'angle') { drawings.angleLock = !drawings.angleLock; renderSelectionBar(); }
   if (act === 'lock') drawings.updateSelected({ locked: !d.locked });
   if (act === 'delete') drawings.removeSelected();
   if (act === 'more') {
@@ -1648,7 +1714,27 @@ $('#chart-settings-form').addEventListener('submit', (e) => {
 $('#chart-settings-reset').addEventListener('click', () => renderChartSettings(CHART_DEFAULTS));
 $('#chart-settings-cancel').addEventListener('click', () => chartSettingsDialog.close());
 
+// 휴대폰: 연필 버튼으로 왼쪽 그리기 도구 막대를 펼치고 접는다 (트레이딩뷰 앱처럼)
+function applyToolsOpen() {
+  document.body.classList.toggle('tools-open', !!settings.toolsOpen);
+  const btn = $('#draw-toggle');
+  btn.classList.toggle('active', !!settings.toolsOpen);
+  btn.setAttribute('aria-pressed', String(!!settings.toolsOpen));
+}
+$('#draw-toggle').innerHTML = icon('pencil', 18);
+$('#draw-toggle').addEventListener('click', () => {
+  settings.toolsOpen = !settings.toolsOpen;
+  if (!settings.toolsOpen) closeFlyout();
+  save();
+  applyToolsOpen();
+});
+// 지표 줄 버튼은 다른 곳을 누르면 닫는다
+document.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('#legend .study')) for (const r of $('#legend').querySelectorAll('.study.open')) r.classList.remove('open');
+}, true);
+
 // ---------- 시작 ----------
+applyToolsOpen();
 renderIntervals();
 renderRanges();
 renderChartTypeBtn();
@@ -1661,3 +1747,6 @@ createMainSeries();
 buildIndicators();
 startTickers();
 loadSymbol();
+
+// 브라우저 확인 스크립트(e2e)에서 상태를 읽는 통로
+window.__rea = { drawings, chart };

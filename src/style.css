@@ -225,7 +225,28 @@ button, select, input { font: inherit; color: inherit; }
   font-size: 12px;
   white-space: nowrap;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 16px);
 }
+.draw-hint > span { overflow: hidden; text-overflow: ellipsis; }
+.hint-cancel {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 25%, transparent);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.bar-btn.angle { font-size: 12px; font-weight: 600; min-width: 34px; }
+.draw-toggle { display: none; }
+.draw-toggle.active { color: var(--accent); background: var(--hover); }
 .chart-wrap.hovering .chart, .chart-wrap.hovering .chart * { cursor: pointer !important; }
 .chart-wrap.hovering-handle .chart, .chart-wrap.hovering-handle .chart * { cursor: move !important; }
 
@@ -247,11 +268,46 @@ button, select, input { font: inherit; color: inherit; }
 .legend .k { color: var(--muted); }
 .legend .up { color: var(--up); }
 .legend .down { color: var(--down); }
-.legend .study { gap: 4px 8px; min-height: 22px; align-items: center; }
+.legend .study {
+  gap: 4px 8px;
+  min-height: 22px;
+  align-items: center;
+  /* 트레이딩뷰처럼 지표 줄에 마우스를 올리면(휴대폰은 누르면) 버튼이 나타난다 */
+  width: max-content;
+  max-width: 100%;
+  margin-left: -4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  pointer-events: auto;
+}
+.legend .study.open { background: color-mix(in srgb, var(--bg) 80%, transparent); box-shadow: inset 0 0 0 1px var(--border); }
+/* 휴대폰은 탭할 때 hover가 같이 걸려 숨은 버튼이 눌리므로, 마우스가 있는 기기에서만 */
+@media (hover: hover) {
+  .legend .study:hover { background: color-mix(in srgb, var(--bg) 80%, transparent); box-shadow: inset 0 0 0 1px var(--border); }
+  .legend .study:hover .ind-actions { visibility: visible; }
+}
+.legend.values-hidden .study .v { display: none; }
+.study-rows { display: flex; flex-direction: column; align-items: flex-start; }
+.legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.legend-toggle:hover { color: var(--text); background: var(--hover); }
 .legend .study .v { font-variant-numeric: tabular-nums; }
 .legend .study.is-hidden .k { opacity: 0.5; text-decoration: line-through; }
-.ind-actions { display: inline-flex; gap: 2px; pointer-events: auto; opacity: 0.55; }
-.legend .study:hover .ind-actions, .ind-actions:focus-within { opacity: 1; }
+.ind-actions { display: inline-flex; gap: 2px; pointer-events: auto; visibility: hidden; }
+.legend .study.open .ind-actions, .ind-actions:focus-within { visibility: visible; }
 .ind-actions button {
   display: grid;
   place-items: center;
@@ -265,7 +321,6 @@ button, select, input { font: inherit; color: inherit; }
   cursor: pointer;
 }
 .ind-actions button:hover { background: var(--hover); }
-@media (hover: none) { .ind-actions { opacity: 0.9; } }
 .loading {
   position: absolute;
   inset: 0;
@@ -423,6 +478,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   .topbar { padding: 0 4px; }
   .legend { left: 8px; right: 60px; }
   .draw-bar { top: auto; bottom: 36px; }
+  /* 트레이딩뷰 앱처럼 그리기 도구는 아래 연필 버튼으로 펼친다 */
+  .draw-toggle { display: grid; place-items: center; padding: 0 6px; }
+  body:not(.tools-open) .tools { display: none; }
+  .draw-bar { gap: 2px; padding: 4px 6px; }
+  .draw-bar .draw-bar-label { display: none; }
 }
 
 /* 지표 추가 창 */
@@ -533,5 +593,5 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   white-space: pre;
 }
 .eraser-cursor .chart, .eraser-cursor .chart * { cursor: cell !important; }
-/* 그리는 동안에는 범례 버튼이 터치·클릭을 가로채지 않게 (차트 어디를 끌어도 십자선이 움직이도록) */
-.chart-wrap.drawing .ind-actions { pointer-events: none; opacity: 0.25; }
+/* 그리는 동안에는 범례가 터치·클릭을 가로채지 않게 (차트 어디를 끌어도 십자선이 움직이도록) */
+.chart-wrap.drawing .legend .study, .chart-wrap.drawing .legend-toggle, .chart-wrap.drawing .ind-actions { pointer-events: none; }

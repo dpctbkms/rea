@@ -81,27 +81,29 @@ const { chromium, devices } = require('playwright');
   await p.screenshot({ path: OUT + '/draw-tv.png' });
   console.log('errors:', errs);
 
-  // 터치: 끌어서 그리기
+  // 휴대폰: 연필 버튼 → 도구 → 십자선을 끌어 옮기고 탭 (자세한 확인은 mobile-tv.cjs)
   const ctx = await b.newContext({ ...devices['iPhone 13'] });
   const m = await ctx.newPage();
   m.on('pageerror', (e) => errs.push('mobile ' + e.message));
   await m.goto(BASE + '/?feed=demo');
   await m.waitForTimeout(1800);
+  await m.tap('#draw-toggle');
+  await m.waitForTimeout(200);
   const mb = await m.locator('#chart').boundingBox();
-  await m.tap('.tools [data-group=lines]');
   const cdp = await ctx.newCDPSession(m);
   const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-  await touch('touchStart', mb.x + 60, mb.y + 400);
-  for (let i = 1; i <= 8; i++) { await touch('touchMove', mb.x + 60 + i * 20, mb.y + 400 - i * 15); await m.waitForTimeout(20); }
-  await touch('touchEnd');
-  await m.waitForTimeout(300);
-  const md = Object.values((await m.evaluate(() => JSON.parse(localStorage.getItem('rea-chart-settings')))).drawings ?? {}).flat();
-  console.log('touch drag-to-draw:', md.map((x) => x.type).join(','));
-  // 터치: 탭 두 번으로 그리기
+  const placeAt = async (x, y) => {
+    const c = await m.evaluate(() => window.__rea.drawings.touchCursor);
+    const fx = mb.x + mb.width / 2, fy = mb.y + mb.height * 0.7;
+    await touch('touchStart', fx, fy);
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', fx + ((x - c.x) * i) / 6, fy + ((y - c.y) * i) / 6); await m.waitForTimeout(15); }
+    await touch('touchEnd'); await m.waitForTimeout(60);
+    await touch('touchStart', fx, fy); await touch('touchEnd'); await m.waitForTimeout(80);
+  };
   await m.tap('.tools [data-group=lines]');
-  await m.touchscreen.tap(mb.x + 80, mb.y + 250); await m.waitForTimeout(400); await m.touchscreen.tap(mb.x + 220, mb.y + 200); await m.waitForTimeout(300);
-  const md2 = Object.values((await m.evaluate(() => JSON.parse(localStorage.getItem('rea-chart-settings')))).drawings ?? {}).flat();
-  console.log('touch tap-tap:', md2.map((x) => x.type).join(','));
+  await placeAt(60, 350); await placeAt(220, 200);
+  const md = Object.values((await m.evaluate(() => JSON.parse(localStorage.getItem('rea-chart-settings')))).drawings ?? {}).flat();
+  console.log('touch crosshair drawing:', md.map((x) => x.type).join(','));
   console.log('errors:', errs);
   await b.close();
 })();

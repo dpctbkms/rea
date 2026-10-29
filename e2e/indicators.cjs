@@ -41,8 +41,11 @@ const { chromium } = require('playwright');
   await p.waitForTimeout(1800);
   console.log('after reload:', (await legendTitles()).join(' | '));
   // EMA 설정 바꾸기: 기간 20 -> 100, 색 변경
-  const emaRow = p.locator('#legend .study', { hasText: 'EMA' }).first();
-  await emaRow.locator('[data-act=settings]').click();
+  // 트레이딩뷰처럼 지표 줄 버튼은 마우스를 올려야 보인다
+  const act = async (text, a) => { const r = p.locator('#legend .study', { hasText: text }).first(); await r.hover(); await r.locator(`[data-act=${a}]`).click(); };
+  const hiddenBefore = !(await p.locator('#legend .study [data-act=settings]').first().isVisible());
+  await act('EMA', 'settings');
+  console.log('buttons hidden until hover:', hiddenBefore);
   console.log('settings title:', await p.textContent('#study-settings-title'));
   await p.fill('#sp-period', '100');
   await p.selectOption('#sp-source', 'hlc3');
@@ -53,10 +56,10 @@ const { chromium } = require('playwright');
   const ema = await p.evaluate(() => JSON.parse(localStorage.getItem('rea-chart-settings')).indicators.find((x) => x.type === 'ema'));
   console.log('ema stored:', JSON.stringify(ema.params), ema.colors.value);
   // 숨기기, 삭제
-  await p.locator('#legend .study', { hasText: 'ADX' }).locator('[data-act=toggle]').click();
+  await act('ADX', 'toggle');
   await p.waitForTimeout(200);
   console.log('adx hidden class:', await p.locator('#legend .study', { hasText: 'ADX' }).getAttribute('class'), '| panes:', await p.evaluate(() => document.querySelectorAll('#chart table tr').length));
-  await p.locator('#legend .study', { hasText: 'Stoch' }).locator('[data-act=remove]').click();
+  await act('Stoch', 'remove');
   await p.waitForTimeout(200);
   console.log('after remove:', (await legendTitles()).join(' | '));
   await p.mouse.move(700, 400);
@@ -65,7 +68,7 @@ const { chromium } = require('playwright');
   await p.screenshot({ path: OUT + '/studies.png' });
   // 설정 창 모바일
   await p.setViewportSize({ width: 390, height: 800 });
-  await p.locator('#legend .study', { hasText: 'BB' }).locator('[data-act=settings]').click();
+  await act('BB', 'settings');
   await p.waitForTimeout(200);
   console.log('mobile scrollWidth:', await p.evaluate(() => document.documentElement.scrollWidth));
   await p.screenshot({ path: OUT + '/studies-settings-mobile.png' });

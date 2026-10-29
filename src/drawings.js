@@ -62,6 +62,9 @@ const PRICE_LABEL = ['hline', 'hray', 'crossline'];
 const TIME_LABEL = ['vline', 'crossline'];
 const ANGLE_SNAP = ['trend', 'ray', 'channel', 'fib', 'fibext', 'measure', 'arrow', 'regression'];
 const SQUARE_SNAP = ['rect', 'ellipse'];
+// 휴대폰 떠 있는 막대의 45° 버튼을 보여 줄 도형 (Shift 대신)
+export const canAngleLock = (type) => ANGLE_SNAP.includes(type);
+const CROSSHAIR_LABEL = '#4c525e';
 const DEFAULT_COLORS = { measure: '#089981', arrowup: '#089981', arrowdown: '#f23645', highlighter: '#ff9800' };
 const HISTORY_LIMIT = 50;
 const MAGNET_PX = 30; // 약한 자석: 이 거리 안이면 붙인다
@@ -106,8 +109,8 @@ function formatDuration(sec) {
 }
 
 export class DrawingManager {
-  constructor({ chart, getBars, getStep, formatPrice, formatTime, formatVolume, onChange, onSelect, onToolChange, onTextCreated }) {
-    Object.assign(this, { chart, getBars, getStep, formatPrice, formatTime, formatVolume, onChange, onSelect, onToolChange, onTextCreated });
+  constructor({ chart, getBars, getStep, formatPrice, formatTime, formatVolume, onChange, onSelect, onToolChange, onTextCreated, onDraft }) {
+    Object.assign(this, { chart, getBars, getStep, formatPrice, formatTime, formatVolume, onChange, onSelect, onToolChange, onTextCreated, onDraft });
     this.drawings = [];
     this.tool = 'cursor';
     this.magnet = 'off'; // off | weak | strong
@@ -123,6 +126,8 @@ export class DrawingManager {
     this.freehand = false; // 브러시로 긋는 중
     this.quick = null; // Shift+클릭 빠른 측정
     this.touchCursor = null; // 휴대폰에서 그릴 때 손가락 대신 점을 찍는 십자선
+    this.lastTouchCursor = null; // 다음 도구를 고르면 십자선이 다시 나타날 자리
+    this.angleLock = false; // 45° 고정 (휴대폰 떠 있는 막대의 버튼, Shift와 같음)
     this.handleFill = '#131722'; // 손잡이 안쪽 색 (차트 배경)
     this.drag = null;
     this.clipboard = null;
@@ -293,6 +298,7 @@ export class DrawingManager {
   // 휴대폰: 그리는 동안 손가락이 움직인 만큼 옮겨지는 십자선
   setTouchCursor(pt) {
     this.touchCursor = pt;
+    if (pt) this.lastTouchCursor = pt;
     if (pt && this.draft) this.hover = this.#fromPixel(pt);
     this.update();
   }
@@ -442,12 +448,13 @@ export class DrawingManager {
       if (samePlace || closes) return void this.finishMulti();
       this.draft ??= this.#newDraft();
       this.draft.points.push(pt);
+      this.onDraft?.();
       return this.update();
     }
     if (samePlace) return;
     this.draft ??= this.#newDraft();
     this.draft.points.push(pt);
-    if (this.draft.points.length < def.points) return this.update();
+    if (this.draft.points.length < def.points) { this.onDraft?.(); return this.update(); }
     this.#finishDraft();
   }
 
@@ -461,7 +468,7 @@ export class DrawingManager {
 
   #constrain(pt, shift) {
     const anchor = this.draft?.points.at(-1);
-    if (!pt || !shift || !anchor) return pt;
+    if (!pt || !(shift || this.angleLock) || !anchor) return pt;
     const a = this.#toPixel(anchor), p = this.#toPixel(pt);
     if (!a || !p) return pt;
     const type = this.#toolType;
@@ -491,6 +498,7 @@ export class DrawingManager {
     if (drawing.type === 'long' || drawing.type === 'short') this.#positionDefaults(drawing);
     if (drawing.type === 'regression') this.#fitRegression(drawing);
     if (drawing.type === 'fib' || drawing.type === 'fibext') drawing.levels = FIB_LEVELS.map(([l]) => l);
+    this.onDraft?.();
     if (this.stay) {
       this.#snapshot();
       this.drawings.push(drawing);
@@ -540,6 +548,7 @@ export class DrawingManager {
     this.hover = null;
     this.press = null;
     this.freehand = false;
+    this.onDraft?.();
     this.update();
     return true;
   }
@@ -570,6 +579,8 @@ export class DrawingManager {
     const group = hit.handle == null && this.selection.has(hit.drawing.id) ? this.selectedAll.filter((d) => !d.locked) : [hit.drawing];
     this.drag = {
       hit, startPx: point, start: this.#fromPixel(point, false),
+      // 손잡이는 손가락(마우스)이 움직인 만큼만 옮긴다 (누른 순간 손가락 밑으로 튀지 않게)
+      handlePx: hit.handle != null ? this.#toPixel(hit.drawing.points[hit.handle]) : null,
       originals: new Map(group.map((d) => [d.id, structuredClone(d.points)])),
       cloneOnMove: ctrl && hit.handle == null, moved: false,
     };
@@ -583,7 +594,8 @@ export class DrawingManager {
     if (keys.shift && hit.handle == null) {
       point = Math.abs(point.x - startPx.x) >= Math.abs(point.y - startPx.y) ? { x: point.x, y: startPx.y } : { x: startPx.x, y: point.y };
     }
-    const now = this.#fromPixel(point, hit.handle != null, hit.handle != null && keys.ctrl);
+    const target = this.drag.handlePx ? { x: this.drag.handlePx.x + point.x - startPx.x, y: this.drag.handlePx.y + point.y - startPx.y } : point;
+    const now = this.#fromPixel(target, hit.handle != null, hit.handle != null && keys.ctrl);
     if (!now || !start) return;
     if (!this.drag.moved) {
       this.#snapshot();
@@ -599,7 +611,7 @@ export class DrawingManager {
     const d = this.drag.hit.drawing;
     if (hit.handle != null) {
       d.points[hit.handle] = now;
-      if (keys.shift && ANGLE_SNAP.includes(d.type) && d.points.length >= 2) {
+      if ((keys.shift || this.angleLock) && ANGLE_SNAP.includes(d.type) && d.points.length >= 2) {
         const other = d.points[hit.handle === 0 ? 1 : 0];
         const a = this.#toPixel(other), p = this.#toPixel(now);
         const snapped = a && p && this.#snapAngle(other, a, p);
@@ -746,6 +758,9 @@ export class DrawingManager {
         else add(px.x, this.formatTime(pt.time), d.color);
       }
     }
+    // 휴대폰 십자선: 점이 찍힐 가격·시간 (자석 적용)
+    const cur = this.#touchCursorPoint();
+    if (cur) add(axis === 'price' ? cur.px.y : cur.px.x, axis === 'price' ? this.formatPrice(cur.pt.price) : this.formatTime(cur.pt.time), CROSSHAIR_LABEL);
     return views;
   }
 
@@ -778,8 +793,16 @@ export class DrawingManager {
     ctx.restore();
   }
 
+  // 십자선이 실제로 점을 찍을 자리 (봉 가운데·자석에 맞춘 위치)
+  #touchCursorPoint() {
+    if (!this.touchCursor || !this.series) return null;
+    const pt = this.#fromPixel(this.touchCursor);
+    const px = pt && this.#toPixel(pt);
+    return px ? { pt, px } : null;
+  }
+
   #touchCursor(ctx, size) {
-    const { x, y } = this.touchCursor;
+    const { x, y } = this.#touchCursorPoint()?.px ?? this.touchCursor;
     ctx.save();
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;

@@ -20,16 +20,22 @@ const TYPE = { infoline: 'trend', extended: 'trend', trendangle: 'trend' };
     p.on('pageerror', (e) => errs.push(e.message));
     await p.goto(BASE + '/?feed=demo');
     await p.waitForTimeout(1800);
+    if (mode === 'touch') { await p.tap('#draw-toggle'); await p.waitForTimeout(200); }
     const box = await p.locator('#chart').boundingBox();
     const cdp = mode === 'touch' ? await ctx.newCDPSession(p) : null;
     const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
     const W = Math.min(box.width - 120, 700), H = Math.min(box.height - 160, 500);
     const at = (i, k) => [box.x + 30 + ((i * 53 + k * 37) % W), box.y + 60 + ((i * 71 + k * 43) % H)];
-    const place = async (x, y) => {
-      if (mode === 'mouse') return p.mouse.click(x, y);
-      // 휴대폰: 손가락을 끌어 십자선을 옮긴 뒤 탭 (첫 점은 그 자리 탭)
-      const has = await p.evaluate(() => !!document.querySelector('.chart-wrap.drawing'));
-      await touch('touchStart', x, y); await touch('touchEnd'); await p.waitForTimeout(60);
+    // 휴대폰: 십자선을 (x, y)로 끌어 옮긴 뒤 탭 (손가락은 차트 아래쪽, 십자선과 다른 곳)
+    const placeAt = async (x, y) => {
+      const c = await p.evaluate(() => window.__rea.drawings.touchCursor);
+      const fx = box.x + box.width / 2, fy = box.y + box.height * 0.75;
+      if (c) {
+        await touch('touchStart', fx, fy);
+        for (let k = 1; k <= 4; k++) await touch('touchMove', fx + ((x - box.x - c.x) * k) / 4, fy + ((y - box.y - c.y) * k) / 4);
+        await touch('touchEnd'); await p.waitForTimeout(40);
+      }
+      await touch('touchStart', fx, fy); await touch('touchEnd'); await p.waitForTimeout(60);
     };
     const select = async (g, id) => {
       if (mode === 'touch') {
@@ -54,25 +60,9 @@ const TYPE = { infoline: 'trend', extended: 'trend', trendangle: 'trend' };
         } else if (n === 'multi') {
           const pts = [at(i, 0), at(i, 1), at(i, 2)];
           if (mode === 'mouse') { for (const [x, y] of pts) await p.mouse.click(x, y); await p.mouse.click(...pts[2]); }
-          else {
-            // 휴대폰: 첫 탭으로 십자선을 놓고, 손가락을 끌어 옮긴 뒤 탭
-            await place(...pts[0]);
-            for (const [x, y] of pts.slice(1)) {
-              const cur = await p.evaluate(() => null);
-              await touch('touchStart', pts[0][0], pts[0][1] + 40);
-              await touch('touchMove', x, y + 40); await touch('touchEnd'); await p.waitForTimeout(40);
-              await place(x, y + 40);
-            }
-            await place(pts[2][0], pts[2][1] + 40);
-          }
+          else { for (const [x, y] of pts) await placeAt(x, y); await placeAt(...pts[2]); } // 같은 자리 한 번 더 = 두 번 탭
         } else if (mode === 'touch') {
-          await place(...at(i, 0));
-          for (let k = 1; k < n; k++) {
-            const [x, y] = at(i, k);
-            const [x0, y0] = at(i, k - 1);
-            await touch('touchStart', x0, y0 + 30); await touch('touchMove', x, y + 30); await touch('touchEnd'); await p.waitForTimeout(40);
-            await place(x0, y0 + 30);
-          }
+          for (let k = 0; k < n; k++) await placeAt(...at(i, k));
         } else {
           for (let k = 0; k < n; k++) await p.mouse.click(...at(i, k));
         }

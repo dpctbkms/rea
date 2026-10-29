@@ -92,33 +92,7 @@ const { chromium, devices } = require('playwright');
   console.log('remove menu:', await p.$$eval('#flyout .fly-item', (e) => e.map((x) => x.textContent.trim()).join('/')));
   await p.keyboard.press('Escape');
 
-  // ---------- 휴대폰: 십자선 방식 ----------
-  const ctx = await b.newContext({ ...devices['iPhone 13'] });
-  const m = await ctx.newPage();
-  m.on('pageerror', (e) => errs.push('mobile ' + e.message));
-  await m.goto(BASE + '/?feed=demo');
-  await m.waitForTimeout(1800);
-  const mb = await m.locator('#chart').boundingBox();
-  const cdp = await ctx.newCDPSession(m);
-  const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-  const tap = async (x, y) => { await touch('touchStart', x, y); await touch('touchEnd'); await m.waitForTimeout(80); };
-  const dragFinger = async (x1, y1, dx, dy) => {
-    await touch('touchStart', x1, y1);
-    for (let i = 1; i <= 8; i++) { await touch('touchMove', x1 + (dx * i) / 8, y1 + (dy * i) / 8); await m.waitForTimeout(15); }
-    await touch('touchEnd'); await m.waitForTimeout(80);
-  };
-  await m.tap('.tools [data-group=lines]');
-  console.log('mobile hint:', await m.textContent('#draw-hint'));
-  // 첫 탭: 그 자리에 점 1
-  await tap(mb.x + 80, mb.y + 400);
-  // 손가락을 아래쪽에서 끌어 십자선을 오른쪽 위로 이동 (손가락은 십자선과 다른 곳)
-  await dragFinger(mb.x + 150, mb.y + 500, 120, -200);
-  // 탭(아무 곳): 십자선 자리에 점 2
-  await tap(mb.x + 150, mb.y + 550);
-  const md = Object.values((await m.evaluate(() => JSON.parse(localStorage.getItem('rea-chart-settings')))).drawings ?? {}).flat();
-  const t = md.at(-1);
-  console.log('mobile trend:', t?.type, '| 2nd point higher than 1st (cursor moved up):', t && t.points[1].price > t.points[0].price);
-  await m.screenshot({ path: OUT + '/tv3-mobile.png' });
+  // 휴대폰 방식은 mobile-tv.cjs에서 확인한다
   console.log('errors:', errs);
   await b.close();
 })();
