@@ -43,6 +43,7 @@ npm install
 npm run dev        # http://localhost:5173
 npm run build      # dist/ 에 정적 파일 생성
 npm test           # 지표 계산 단위 테스트
+npm run test:e2e   # 브라우저로 화면 동작 확인 (Playwright 필요)
 ```
 
 `npm run build:artifact`는 앱을 웹 페이지 한 장(`dist-artifact/rea-chart.html`)으로 묶습니다. 이 버전은 데모 시세를 쓰고 스크린샷 버튼이 없습니다.
@@ -67,6 +68,8 @@ npm test           # 지표 계산 단위 테스트
 | `src/studies.js` | 지표 목록과 설정 정의 (입력값, 선, 기준선). 새 지표는 여기에 추가합니다. |
 | `src/indicators.js` | SMA, EMA, 볼린저, RSI(Wilder), MACD, VWAP, 하이킨아시 계산 |
 | `test/` | 지표·피드 도우미 단위 테스트(`node --test`) |
+| `e2e/` | 브라우저 확인 스크립트(`npm run test:e2e`) |
+| `docs/PROGRESS.md` | 작업 기록: 진행 중, 완료, 해야 할 일. 작업마다 갱신 |
 
 다른 거래소나 주식 데이터를 붙이려면 `src/feeds/`에 같은 인터페이스의 피드를 만들어 `src/feeds/index.js`의 `FEEDS`에 추가하면 됩니다.
 

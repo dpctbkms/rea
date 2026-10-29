@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
     "build:artifact": "node scripts/build-artifact.mjs",
-    "check:feeds": "node scripts/check-feeds.mjs"
+    "check:feeds": "node scripts/check-feeds.mjs",
+    "test:e2e": "node e2e/run.mjs"
   },
   "dependencies": {
     "lightweight-charts": "5.1.0"
