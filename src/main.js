@@ -6,7 +6,7 @@ import { FEEDS, INTERVALS } from './feeds/index.js';
 import { coinName } from './feeds/common.js';
 import { heikinAshi } from './indicators.js';
 import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
-import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS, FIB_LEVELS, canAngleLock } from './drawings.js';
+import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS, FIB_LEVELS, canAngleLock, TOUCH_HIT } from './drawings.js';
 import { BarCountdown } from './countdown.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -565,6 +565,8 @@ const drawings = new DrawingManager({
   onSelect: () => renderSelectionBar(),
   onToolChange: () => { renderTools(); showTouchCursor(); },
   onDraft: () => renderHint(),
+  // 도형을 옮기는 동안에는 떠 있는 막대를 감춘다 (손가락·도형을 가리지 않게)
+  onDragState: (on) => $('.chart-wrap').classList.toggle('dragging-drawing', on),
 });
 
 // 휴대폰: 도구를 고르면 트레이딩뷰처럼 십자선이 바로 나타난다 (마지막 자리, 처음이면 차트 가운데).
@@ -957,6 +959,34 @@ let lastTap = null; // 더블클릭(더블탭) 판정용
 let blockChart = false;
 // 휴대폰 그리기: 트레이딩뷰 모바일처럼 손가락을 끌면 십자선이 그만큼 움직이고, 탭하면 십자선 자리에 점을 찍는다
 let trackpad = null; // { finger: 누른 손가락 위치, cursor: 그때 십자선 위치 }
+// 휴대폰: 선택하지 않은 도형 위에서 누른 손가락. 트레이딩뷰 앱처럼
+// 탭하면 선택, 꾹 누르면(0.4초) 잡아서 옮기기, 그냥 끌면 도형이 아니라 차트가 움직인다.
+let grab = null; // { id, hit, start, last, timer, pan }
+const LONG_PRESS_MS = 400;
+
+function startGrab(e, pt, hit) {
+  grab = { id: e.pointerId, hit, start: pt, last: pt, pan: null, timer: null };
+  grab.timer = setTimeout(() => {
+    if (!grab || grab.pan) return;
+    grab.timer = null;
+    drawings.select(hit.drawing.id);
+    if (drawings.beginDrag(grab.start, true, false, hit)) {
+      navigator.vibrate?.(12); // 잡았다는 느낌 (지원하는 휴대폰만)
+      drawings.dragTo(grab.last, {});
+    }
+  }, LONG_PRESS_MS);
+}
+function cancelGrab() {
+  if (!grab) return;
+  clearTimeout(grab.timer);
+  grab = null;
+}
+// 도형 위에서 시작한 끌기는 차트 라이브러리가 못 받으므로, 차트를 직접 좌우로 옮긴다
+function panChartBy(dx, range) {
+  const ts = chart.timeScale();
+  const shift = (-dx * (range.to - range.from)) / Math.max(1, ts.width());
+  ts.setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
+}
 
 function moveTouchCursor(pt) {
   const w = chart.timeScale().width(), h = chart.panes()[0].getHeight();
@@ -968,6 +998,9 @@ function moveTouchCursor(pt) {
 chartEl.addEventListener('pointerdown', (e) => {
   const pt = localPoint(e);
   const touch = e.pointerType !== 'mouse';
+  drawings.touchUI = touch;
+  // 두 번째 손가락(확대·축소)이 오면 도형 잡기를 그만두고 차트에 맡긴다
+  if (grab && e.pointerId !== grab.id) { cancelGrab(); blockChart = false; drawings.endDrag(); return; }
   // drawing: 이 누름이 그리기였는지 (점을 찍다가 도형이 완성돼 커서로 돌아가도 탭으로 치지 않도록)
   press = { point: pt, at: performance.now(), id: e.pointerId, touch, drawing: drawings.tool !== 'cursor' };
   if (e.button !== 0) return;
@@ -992,7 +1025,14 @@ chartEl.addEventListener('pointerdown', (e) => {
     press.drawing = true;
   } else if (settings.cursorMode === 'eraser') {
     return;
-  } else if (drawings.beginDrag(pt, touch, e.ctrlKey || e.metaKey)) {
+  } else if (touch) {
+    // 휴대폰: 선택된 도형은 바로 끌어 옮기고, 선택 안 된 도형은 탭(선택)·꾹 누르기(잡기)·끌기(차트 이동)로 나눈다
+    const hit = drawings.hitTest(pt, TOUCH_HIT);
+    if (!hit) return;
+    if (!drawings.selection.has(hit.drawing.id)) startGrab(e, pt, hit);
+    else if (!drawings.beginDrag(pt, true, false, hit)) return;
+    blockChart = true;
+  } else if (drawings.beginDrag(pt, false, e.ctrlKey || e.metaKey)) {
     blockChart = true;
   } else {
     return;
@@ -1003,8 +1043,20 @@ chartEl.addEventListener('pointerdown', (e) => {
 for (const type of ['mousedown', 'touchstart']) {
   chartEl.addEventListener(type, (e) => { if (blockChart) e.stopPropagation(); }, { capture: true });
 }
+// 앱이 처리하는 손가락 동작 중에는 브라우저의 기본 동작(화면 넘기기)도 막는다
+chartEl.addEventListener('touchmove', (e) => { if (blockChart && e.cancelable) e.preventDefault(); }, { capture: true, passive: false });
 window.addEventListener('pointermove', (e) => {
   const pt = localPoint(e);
+  if (grab && e.pointerId === grab.id && !drawings.drag) {
+    grab.last = pt;
+    // 꾹 누르기 전에 움직이면 차트 이동
+    if (!grab.pan && Math.hypot(pt.x - grab.start.x, pt.y - grab.start.y) > 8) {
+      clearTimeout(grab.timer);
+      grab.pan = { x: pt.x, range: chart.timeScale().getVisibleLogicalRange() };
+    }
+    if (grab.pan?.range) panChartBy(pt.x - grab.pan.x, grab.pan.range);
+    return;
+  }
   if (drawings.drag) return drawings.dragTo(pt, keysOf(e));
   if (trackpad && press?.id === e.pointerId) {
     moveTouchCursor({ x: trackpad.cursor.x + pt.x - trackpad.finger.x, y: trackpad.cursor.y + pt.y - trackpad.finger.y });
@@ -1034,7 +1086,10 @@ chartEl.addEventListener('pointerup', (e) => {
   press = null;
   const pt = localPoint(e);
   blockChart = false;
+  const panned = grab?.pan;
+  cancelGrab();
   if (drawings.drag) { drawings.endDrag(); }
+  if (panned) return;
   if (trackpad) {
     // 휴대폰: 끌지 않고 뗀 탭이면 십자선 자리에 점을 찍는다
     const tp = trackpad;
@@ -1051,7 +1106,7 @@ chartEl.addEventListener('pointerup', (e) => {
   if (Math.hypot(pt.x - start.point.x, pt.y - start.point.y) > (start.touch ? 10 : 5) || !inMainPane(pt)) return;
   if (settings.cursorMode === 'eraser') {
     // 지우개: 누른 도형을 지운다
-    const hit = drawings.hitTest(pt, start.touch ? 14 : 7);
+    const hit = drawings.hitTest(pt, start.touch ? TOUCH_HIT : 7);
     if (hit) drawings.removeById(hit.drawing.id);
     return;
   }
@@ -1067,14 +1122,14 @@ chartEl.addEventListener('pointerup', (e) => {
   }
   lastTap = id ? { id, at: now } : null;
 }, { capture: true });
-window.addEventListener('pointerup', () => { blockChart = false; drawings.endDrag(); });
+window.addEventListener('pointerup', () => { blockChart = false; cancelGrab(); drawings.endDrag(); });
 
 $('.chart-wrap').addEventListener('click', (e) => {
   const s = swallowClick;
   swallowClick = null;
   if (s && performance.now() < s.until && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 20) { e.stopPropagation(); e.preventDefault(); }
 }, { capture: true });
-window.addEventListener('pointercancel', () => { blockChart = false; trackpad = null; drawings.endDrag(); });
+window.addEventListener('pointercancel', () => { blockChart = false; trackpad = null; cancelGrab(); drawings.endDrag(); });
 
 // ---------- 펼침 메뉴 (툴바·오른쪽 클릭 공용) ----------
 const popover = $('#popover');

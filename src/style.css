@@ -173,7 +173,9 @@ button, select, input { font: inherit; color: inherit; }
 .caret:hover { background: var(--border); }
 /* 터치 화면에서는 작은 삼각형이 버튼 대신 눌리지 않게 한다 (같은 버튼을 한 번 더 누르면 펼침) */
 @media (hover: none) { .caret { pointer-events: none; } }
-.chart-wrap.drawing .chart * { touch-action: none; }
+/* 차트 위 손가락 동작(이동·확대·그리기·도형 옮기기)은 전부 앱이 처리한다.
+   브라우저가 화면 넘기기로 가로채면 도형 옮기기가 중간에 끊긴다(pointercancel). */
+.chart, .chart * { touch-action: none; }
 .arrow-cursor .chart, .arrow-cursor .chart * { cursor: default; }
 .tool:hover:not(:disabled) { background: var(--hover); }
 .tool.active { color: var(--accent); background: var(--hover); }
@@ -248,6 +250,7 @@ button, select, input { font: inherit; color: inherit; }
 .draw-toggle { display: none; }
 .draw-toggle.active { color: var(--accent); background: var(--hover); }
 .chart-wrap.hovering .chart, .chart-wrap.hovering .chart * { cursor: pointer !important; }
+.chart-wrap.dragging-drawing .draw-bar { opacity: 0; pointer-events: none; transition: opacity 0.12s; }
 .chart-wrap.hovering-handle .chart, .chart-wrap.hovering-handle .chart * { cursor: move !important; }
 
 .chart-wrap { position: relative; flex: 1; min-width: 0; }
