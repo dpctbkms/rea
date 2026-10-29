@@ -226,7 +226,8 @@ button, select, input { font: inherit; color: inherit; }
   white-space: nowrap;
   pointer-events: none;
 }
-.chart-wrap.hovering .chart, .chart-wrap.hovering .chart * { cursor: move !important; }
+.chart-wrap.hovering .chart, .chart-wrap.hovering .chart * { cursor: pointer !important; }
+.chart-wrap.hovering-handle .chart, .chart-wrap.hovering-handle .chart * { cursor: move !important; }
 
 .chart-wrap { position: relative; flex: 1; min-width: 0; }
 .chart { position: absolute; inset: 0; }
@@ -497,3 +498,14 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .fields.one { grid-template-columns: 1fr; }
 .field textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; resize: vertical; }
 .chart-wrap.drawing .chart { touch-action: none; }
+
+/* 도형 설정 탭 */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 0 -20px; padding: 0 16px; }
+.tab { height: 34px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-panel { display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.coord-row { display: grid; grid-template-columns: 56px 1fr 1.4fr; gap: 8px; align-items: end; }
+.coord-name { padding-bottom: 9px; color: var(--muted); font-size: 12px; }
+.muted.small { font-size: 12px; margin: 0; }
+@media (max-width: 480px) { .coord-row { grid-template-columns: 1fr; } .coord-name { padding: 0; } }

@@ -5,7 +5,7 @@ import {
 import { FEEDS, INTERVALS } from './feeds/index.js';
 import { heikinAshi } from './indicators.js';
 import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
-import { DrawingManager, TOOLS, COLORS, LINE_STYLES } from './drawings.js';
+import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS } from './drawings.js';
 import { BarCountdown } from './countdown.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -38,6 +38,10 @@ const CHART_DEFAULTS = {
   priceLine: true, countdown: true, bgColor: '', vertGrid: true, horzGrid: true, legendOhlc: true, legendValues: true,
 };
 settings.chart = { ...CHART_DEFAULTS, ...settings.chart };
+// 예전 자석 설정(true/false)을 약한·강한 자석 방식으로
+if (typeof settings.magnet === 'boolean') settings.magnet = settings.magnet ? 'weak' : 'off';
+settings.magnet ??= 'off';
+settings.magnetMode ??= 'weak'; // 자석 버튼을 켤 때 쓸 방식
 // 예전 버전의 수평선(lines: 가격 배열)을 도형으로 옮긴다.
 if (settings.lines) {
   for (const [key, prices] of Object.entries(settings.lines)) {
@@ -409,6 +413,9 @@ const ICONS = {
   short: '<path d="M3 3h14M3 7h14" stroke-dasharray="2 2"/><rect x="3" y="10" width="14" height="7" rx="1"/>',
   text: '<path d="M4 5V3h12v2M10 3v14M7 17h6"/>',
   magnet: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3"/>',
+  off: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3M3 17L17 3"/>',
+  weak: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3"/>',
+  strong: '<path d="M5 3v7a5 5 0 0010 0V3"/><path d="M5 6h3M12 6h3"/><path d="M8 11h4" stroke-width="2.4"/>',
   lock: '<rect x="4" y="9" width="12" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 016 0V9"/>',
   unlock: '<rect x="4" y="9" width="12" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 015.8-1"/>',
   eye: '<path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z"/><circle cx="10" cy="10" r="2.5"/>',
@@ -451,7 +458,9 @@ const TOOL_GROUPS = [
   { id: 'text', items: ['text'] },
   { id: 'forecast', items: ['long', 'short', 'measure'] },
 ];
-const toolInfo = (id) => TOOLS.find((t) => t.id === id) ?? CURSORS.find((c) => c.id === id);
+const MAGNETS = { weak: '약한 자석: 가까울 때만 시가·고가·저가·종가에 붙임', strong: '강한 자석: 항상 가장 가까운 시가·고가·저가·종가에 붙임' };
+const MAGNET_ITEMS = [{ id: 'weak', label: '약한 자석' }, { id: 'strong', label: '강한 자석' }, { id: 'off', label: '자석 끄기' }];
+const toolInfo = (id) => TOOLS.find((t) => t.id === id) ?? CURSORS.find((c) => c.id === id) ?? MAGNET_ITEMS.find((m) => m.id === id);
 const altKey = (key) => (key ? `Alt+${key}` : '');
 
 const drawings = new DrawingManager({
@@ -459,6 +468,12 @@ const drawings = new DrawingManager({
   getBars: () => bars,
   getStep: () => INTERVALS.find((i) => i.id === settings.interval).seconds,
   formatPrice: (p) => fmt(p, priceFormatFor(bars.length ? bars[bars.length - 1].close : Math.abs(p)).precision),
+  formatTime: (t) => {
+    const d = new Date(t * 1000), two = (n) => String(n).padStart(2, '0');
+    const date = `${String(d.getFullYear()).slice(2)}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+    return stepSeconds() >= 86400 ? date : `${date} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  },
+  onTextCreated: () => openDrawingSettings('text'),
   onChange: (list) => {
     if (list.length) settings.drawings[lineKey()] = list;
     else delete settings.drawings[lineKey()];
@@ -486,7 +501,7 @@ function renderTools() {
     }),
     '<div class="tools-sep"></div>',
     `<button class="tool ${drawings.stay ? 'active' : ''}" data-action="stay" title="드로잉 모드 유지: 다 그려도 같은 도구로 계속 그림" aria-label="드로잉 모드 유지" aria-pressed="${drawings.stay}">${icon('stay')}</button>`,
-    `<button class="tool ${drawings.magnet ? 'active' : ''}" data-action="magnet" title="자석: 점을 가까운 시가·고가·저가·종가에 붙임" aria-label="자석" aria-pressed="${drawings.magnet}">${icon('magnet')}</button>`,
+    `<button class="tool ${drawings.magnet !== 'off' ? 'active' : ''}" data-action="magnet" title="${MAGNETS[settings.magnetMode]} (그리는 중 Ctrl을 누르면 잠깐 반대로)" aria-label="자석" aria-pressed="${drawings.magnet !== 'off'}">${icon(settings.magnetMode)}<span class="caret" data-flyout="magnet" title="자석 방식"></span></button>`,
     `<button class="tool ${drawings.locked ? 'active' : ''}" data-action="lock" title="${drawings.locked ? '그림 잠금 풀기' : '그림 모두 잠그기'}" aria-label="잠금" aria-pressed="${drawings.locked}">${icon(drawings.locked ? 'lock' : 'unlock')}</button>`,
     `<button class="tool ${drawings.hidden ? 'active' : ''}" data-action="hide" title="${drawings.hidden ? '그림 보이기' : '그림 모두 숨기기'}" aria-label="숨기기" aria-pressed="${drawings.hidden}">${icon(drawings.hidden ? 'eyeOff' : 'eye')}</button>`,
     `<button class="tool" data-action="clear" title="이 종목의 그림 모두 지우기" aria-label="모두 지우기" ${drawings.drawings.length ? '' : 'disabled'}>${icon('clear')}</button>`,
@@ -516,9 +531,9 @@ function pickTool(groupId, id) {
 }
 
 function openFlyout(groupId, anchor) {
-  const g = TOOL_GROUPS.find((x) => x.id === groupId);
+  const g = groupId === 'magnet' ? { id: 'magnet', items: MAGNET_ITEMS.map((m) => m.id) } : TOOL_GROUPS.find((x) => x.id === groupId);
   const fly = $('#flyout');
-  const current = groupCurrent(g);
+  const current = groupId === 'magnet' ? (drawings.magnet === 'off' ? null : drawings.magnet) : groupCurrent(g);
   fly.innerHTML = g.items.map((id) => {
     const info = toolInfo(id);
     return `<button class="fly-item ${id === current ? 'active' : ''}" data-group="${g.id}" data-pick="${id}" role="menuitem">
@@ -546,7 +561,11 @@ $('.tools').addEventListener('click', (e) => {
     return pickTool(g.id, groupCurrent(g));
   }
   const action = btn.dataset.action;
-  if (action === 'magnet') { drawings.magnet = !drawings.magnet; settings.magnet = drawings.magnet; save(); renderTools(); }
+  if (action === 'magnet') {
+    // 휴대폰에서는 작은 삼각형을 누를 수 없으니, 켜진 자석을 누르면 방식 메뉴를 연다
+    if (drawings.magnet !== 'off' && matchMedia('(hover: none)').matches) return openFlyout('magnet', btn);
+    setMagnet(drawings.magnet === 'off' ? settings.magnetMode : 'off');
+  }
   if (action === 'stay') { drawings.stay = !drawings.stay; settings.stayDrawing = drawings.stay; save(); renderTools(); }
   if (action === 'lock') { drawings.locked = !drawings.locked; drawings.select(null); renderTools(); }
   if (action === 'hide') { drawings.hidden = !drawings.hidden; drawings.select(null); drawings.update(); renderTools(); }
@@ -556,8 +575,17 @@ $('#flyout').addEventListener('click', (e) => {
   const item = e.target.closest('[data-pick]');
   if (!item) return;
   closeFlyout();
+  if (item.dataset.group === 'magnet') return setMagnet(item.dataset.pick);
   pickTool(item.dataset.group, item.dataset.pick);
 });
+
+function setMagnet(mode) {
+  drawings.magnet = mode;
+  settings.magnet = mode;
+  if (mode !== 'off') settings.magnetMode = mode;
+  save();
+  renderTools();
+}
 document.addEventListener('pointerdown', (e) => {
   if (!$('#flyout').hidden && !e.target.closest('#flyout, .tools')) closeFlyout();
 }, true);
@@ -572,7 +600,8 @@ function renderSelectionBar() {
   const bar = $('#draw-bar');
   bar.hidden = !d;
   if (!d) return;
-  const label = TOOLS.find((t) => t.id === d.type).label;
+  const count = drawings.selection.size;
+  const label = count > 1 ? `${count}개 선택` : TOOLS.find((t) => t.id === d.type).label;
   bar.innerHTML = `<span class="draw-bar-label">${label}</span>`
     + (d.type === 'measure' ? '' : `<button class="bar-btn" data-action="color" title="색" aria-label="색"><span class="color-dot" style="--c:${d.color}"></span></button>`)
     + (HAS_LINE(d) ? `<button class="bar-btn" data-action="width" title="선 두께">${lineStyleSvg('solid', d.width ?? 2)}<span>${d.width ?? 2}px</span></button>
@@ -604,41 +633,90 @@ $('#draw-bar').addEventListener('click', (e) => {
   if (act === 'delete') drawings.removeSelected();
 });
 
-// 도형 설정 창 (더블클릭)
+// 도형 설정 창 (더블클릭): 스타일 · 텍스트 · 좌표 · 보이기
 const drawingDialog = $('#drawing-settings');
-function openDrawingSettings() {
+const toLocalInput = (t) => {
+  const d = new Date(t * 1000), two = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
+};
+const POINT_NAMES = {
+  long: ['진입', '목표', '손절'], short: ['진입', '목표', '손절'], channel: ['점 1', '점 2', '채널 폭'],
+};
+const STATS = [['price', '가격 범위'], ['bars', '봉 수·기간'], ['angle', '각도']];
+
+function openDrawingSettings(tab = 'style') {
   const d = drawings.selected;
   if (!d) return;
   const label = TOOLS.find((t) => t.id === d.type).label;
+  const isLine = d.type === 'trend' || d.type === 'ray';
   const check = (key, text, on) => `<label class="field check" for="ds-${key}"><input id="ds-${key}" name="${key}" type="checkbox" ${on ? 'checked' : ''} /><span>${text}</span></label>`;
+  const tabs = [['style', '스타일'], ...(isLine || d.type === 'text' ? [['text', '텍스트']] : []), ['coords', '좌표'], ['visibility', '보이기']];
   $('#drawing-settings-title').textContent = `${label} 설정`;
+  const coordRows = d.points.map((pt, i) => {
+    const name = POINT_NAMES[d.type]?.[i] ?? `점 ${i + 1}`;
+    const showTime = d.type !== 'hline' && !(['long', 'short'].includes(d.type) && i === 2);
+    const showPrice = d.type !== 'vline';
+    return `<div class="coord-row"><span class="coord-name">${name}</span>
+      ${showPrice ? `<label class="field" for="ds-price${i}"><span>가격</span><input id="ds-price${i}" name="price${i}" type="number" step="any" value="${pt.price}" /></label>` : ''}
+      ${showTime ? `<label class="field" for="ds-time${i}"><span>시간</span><input id="ds-time${i}" name="time${i}" type="datetime-local" value="${toLocalInput(pt.time)}" /></label>` : ''}</div>`;
+  }).join('');
   $('#drawing-settings-body').innerHTML = `
-    <h3>모양</h3>
-    <div class="fields">
-      ${d.type === 'measure' ? '' : `<label class="field color" for="ds-color"><span>색</span><input id="ds-color" name="color" type="color" value="${d.color}" /></label>`}
-      ${HAS_LINE(d) ? `<label class="field" for="ds-width"><span>선 두께</span><select id="ds-width" name="width">${[1, 2, 3, 4].map((w) => `<option value="${w}" ${w === (d.width ?? 2) ? 'selected' : ''}>${w}px</option>`).join('')}</select></label>
-      <label class="field" for="ds-lineStyle"><span>선 모양</span><select id="ds-lineStyle" name="lineStyle">${Object.keys(LINE_STYLES).map((st) => `<option value="${st}" ${st === (d.lineStyle ?? 'solid') ? 'selected' : ''}>${LINE_STYLE_LABELS[st]}</option>`).join('')}</select></label>` : ''}
-    </div>
-    ${d.type === 'trend' || d.type === 'ray' ? `<h3>연장</h3><div class="fields">${check('extendLeft', '왼쪽으로 연장', d.extendLeft)}${check('extendRight', '오른쪽으로 연장', d.extendRight ?? d.type === 'ray')}</div>` : ''}
-    ${d.type === 'text' ? `<h3>텍스트</h3><div class="fields one">
-      <label class="field" for="ds-text"><span>내용</span><textarea id="ds-text" name="text" rows="3">${d.text ?? ''}</textarea></label>
-      <label class="field" for="ds-fontSize"><span>글자 크기</span><select id="ds-fontSize" name="fontSize">${[10, 12, 14, 18, 24, 32].map((f) => `<option value="${f}" ${f === (d.fontSize ?? 14) ? 'selected' : ''}>${f}</option>`).join('')}</select></label></div>` : ''}
-    <h3>기타</h3>
-    <div class="fields">${check('locked', '잠금 (옮기지 않기)', d.locked)}</div>`;
+    <div class="tabs" role="tablist">${tabs.map(([id, text]) => `<button type="button" role="tab" class="tab ${id === tab ? 'active' : ''}" data-tab="${id}">${text}</button>`).join('')}</div>
+    <section class="tab-panel" data-panel="style" ${tab === 'style' ? '' : 'hidden'}>
+      <div class="fields">
+        ${d.type === 'measure' ? '' : `<label class="field color" for="ds-color"><span>색</span><input id="ds-color" name="color" type="color" value="${d.color}" /></label>`}
+        ${HAS_LINE(d) ? `<label class="field" for="ds-width"><span>선 두께</span><select id="ds-width" name="width">${[1, 2, 3, 4].map((w) => `<option value="${w}" ${w === (d.width ?? 2) ? 'selected' : ''}>${w}px</option>`).join('')}</select></label>
+        <label class="field" for="ds-lineStyle"><span>선 모양</span><select id="ds-lineStyle" name="lineStyle">${Object.keys(LINE_STYLES).map((st) => `<option value="${st}" ${st === (d.lineStyle ?? 'solid') ? 'selected' : ''}>${LINE_STYLE_LABELS[st]}</option>`).join('')}</select></label>` : ''}
+      </div>
+      ${isLine ? `<h3>연장·끝 모양</h3><div class="fields">${check('extendLeft', '왼쪽으로 연장', d.extendLeft)}${check('extendRight', '오른쪽으로 연장', d.extendRight ?? d.type === 'ray')}${check('arrowLeft', '시작점 화살표', d.arrowLeft)}${check('arrowRight', '끝점 화살표', d.arrowRight)}</div>
+      <h3>통계</h3><div class="fields">${STATS.map(([k, t]) => check(`stat-${k}`, t, d.stats?.includes(k))).join('')}</div>` : ''}
+      <h3>기타</h3><div class="fields">${check('locked', '잠금 (옮기지 않기)', d.locked)}</div>
+    </section>
+    <section class="tab-panel" data-panel="text" ${tab === 'text' ? '' : 'hidden'}>
+      <div class="fields one">
+        <label class="field" for="ds-text"><span>${isLine ? '선 위에 표시할 글자' : '내용'}</span><textarea id="ds-text" name="text" rows="3">${d.text ?? ''}</textarea></label>
+        ${d.type === 'text' ? `<label class="field" for="ds-fontSize"><span>글자 크기</span><select id="ds-fontSize" name="fontSize">${[10, 12, 14, 18, 24, 32].map((f) => `<option value="${f}" ${f === (d.fontSize ?? 14) ? 'selected' : ''}>${f}</option>`).join('')}</select></label>` : ''}
+      </div>
+    </section>
+    <section class="tab-panel" data-panel="coords" ${tab === 'coords' ? '' : 'hidden'}>${coordRows}</section>
+    <section class="tab-panel" data-panel="visibility" ${tab === 'visibility' ? '' : 'hidden'}>
+      <p class="muted small">선택한 타임프레임에서만 이 도형을 보여 줍니다.</p>
+      <div class="fields">${VISIBILITY_GROUPS.map((g) => check(`vis-${g.id}`, g.label, !(d.hiddenOn ?? []).includes(g.id))).join('')}</div>
+    </section>`;
   drawingDialog.showModal();
+  if (tab === 'text') { const t = $('#ds-text'); t.focus(); t.select(); }
 }
+$('#drawing-settings-body').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-tab]');
+  if (!tab) return;
+  for (const b of drawingDialog.querySelectorAll('[data-tab]')) b.classList.toggle('active', b === tab);
+  for (const p of drawingDialog.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab.dataset.tab;
+});
 $('#drawing-settings-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const d = drawings.selected;
   const f = new FormData(e.currentTarget);
-  const patch = { locked: f.has('locked') };
-  if (f.has('color')) patch.color = f.get('color');
-  if (f.has('width')) patch.width = Number(f.get('width'));
-  if (f.has('lineStyle')) patch.lineStyle = f.get('lineStyle');
-  if (d.type === 'trend' || d.type === 'ray') { patch.extendLeft = f.has('extendLeft'); patch.extendRight = f.has('extendRight'); }
-  if (d.type === 'text') { patch.text = String(f.get('text')).trim() || d.text; patch.fontSize = Number(f.get('fontSize')); }
+  // 모양: 선택된 모든 도형에
+  const style = { locked: f.has('locked'), hiddenOn: VISIBILITY_GROUPS.filter((g) => !f.has(`vis-${g.id}`)).map((g) => g.id) };
+  if (f.has('color')) style.color = f.get('color');
+  if (f.has('width')) style.width = Number(f.get('width'));
+  if (f.has('lineStyle')) style.lineStyle = f.get('lineStyle');
+  // 좌표·글자·선 옵션: 이 도형에만
+  const own = {};
+  if (d.type === 'trend' || d.type === 'ray') {
+    Object.assign(own, { extendLeft: f.has('extendLeft'), extendRight: f.has('extendRight'), arrowLeft: f.has('arrowLeft'), arrowRight: f.has('arrowRight') });
+    own.stats = STATS.map(([k]) => k).filter((k) => f.has(`stat-${k}`));
+    own.text = String(f.get('text') ?? '').trim();
+  }
+  if (d.type === 'text') { own.text = String(f.get('text')).trim() || d.text; own.fontSize = Number(f.get('fontSize')); }
+  own.points = d.points.map((pt, i) => ({
+    time: f.get(`time${i}`) ? Date.parse(f.get(`time${i}`)) / 1000 : pt.time,
+    price: f.get(`price${i}`) !== null && f.get(`price${i}`) !== '' ? Number(f.get(`price${i}`)) : pt.price,
+  }));
+  if (['long', 'short'].includes(d.type)) own.points[2].time = own.points[1].time;
   drawingDialog.close();
-  drawings.updateSelected(patch);
+  if (drawings.selection.size > 1) drawings.updateSelected(style);
+  drawings.updateSelected(drawings.selection.size > 1 ? own : { ...style, ...own }, true);
 });
 $('#drawing-settings-cancel').addEventListener('click', () => drawingDialog.close());
 
@@ -650,6 +728,7 @@ const localPoint = (e) => {
   const r = chartEl.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 };
+const keysOf = (e) => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
 const inMainPane = (pt) => pt.x >= 0 && pt.y >= 0 && pt.x <= chart.timeScale().width() && pt.y <= chart.panes()[0].getHeight();
 let press = null; // 누른 위치·시각 (탭 판정용)
 let lastTap = null; // 더블클릭(더블탭) 판정용
@@ -665,7 +744,7 @@ chartEl.addEventListener('pointerdown', (e) => {
     if (!inMainPane(pt)) return;
     blockChart = true;
     lastTap = null;
-    drawings.pressDraw(pt, e.shiftKey);
+    drawings.pressDraw(pt, keysOf(e));
   } else if (drawings.beginDrag(pt, touch, e.ctrlKey || e.metaKey)) {
     blockChart = true;
   } else {
@@ -679,10 +758,12 @@ for (const type of ['mousedown', 'touchstart']) {
 }
 window.addEventListener('pointermove', (e) => {
   const pt = localPoint(e);
-  if (drawings.drag) return drawings.dragTo(pt, e.shiftKey);
-  if (drawings.tool !== 'cursor') return drawings.handleMove(pt, e.shiftKey);
+  if (drawings.drag) return drawings.dragTo(pt, keysOf(e));
+  if (drawings.tool !== 'cursor') return drawings.handleMove(pt, keysOf(e));
   if (e.target.closest?.('#chart') && e.pointerType === 'mouse') {
-    $('.chart-wrap').classList.toggle('hovering', !!drawings.setHover(pt));
+    const hit = drawings.setHover(pt);
+    $('.chart-wrap').classList.toggle('hovering', !!hit && hit.handle == null);
+    $('.chart-wrap').classList.toggle('hovering-handle', !!hit && hit.handle != null);
   }
 });
 
@@ -696,10 +777,11 @@ chartEl.addEventListener('pointerup', (e) => {
   const pt = localPoint(e);
   blockChart = false;
   if (drawings.drag) { drawings.endDrag(); }
-  if (start?.drawing) return drawings.releaseDraw(pt, e.shiftKey);
+  if (start?.drawing) return drawings.releaseDraw(pt, keysOf(e));
   if (!start || start.id !== e.pointerId || performance.now() - start.at > TAP_MAX_MS) return;
   if (Math.hypot(pt.x - start.point.x, pt.y - start.point.y) > (start.touch ? 10 : 5) || !inMainPane(pt)) return;
-  drawings.handleClick(pt, { touch: start.touch });
+  drawings.handleClick(pt, { touch: start.touch, ctrl: e.ctrlKey || e.metaKey });
+  if (e.ctrlKey || e.metaKey) return;
   // 같은 도형을 빠르게 두 번 누르면 설정 창
   const id = drawings.selected?.id;
   const now = performance.now();
@@ -1372,7 +1454,7 @@ renderRanges();
 renderChartTypeBtn();
 applyScale();
 setPanel(settings.panelOpen);
-drawings.magnet = !!settings.magnet;
+drawings.magnet = settings.magnet;
 drawings.stay = !!settings.stayDrawing;
 renderTools();
 createMainSeries();

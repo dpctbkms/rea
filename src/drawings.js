@@ -25,14 +25,27 @@ const NO_HANDLES = ['hline', 'vline', 'crossline', 'text'];
 export const COLORS = ['#2962ff', '#f23645', '#089981', '#ff9800', '#9c27b0', '#787b86', '#00bcd4', '#e91e63', '#ffeb3b', '#ffffff', '#4caf50', '#000000'];
 export const LINE_STYLES = { solid: [], dashed: [8, 5], dotted: [2, 4] };
 
-// Shift를 누르고 그리면 각도를 45° 단위로 맞추는 도형
+// Shift를 누르고 그리면 각도를 45° 단위로 맞추는 도형 / 정사각형·원으로 맞추는 도형
 const ANGLE_SNAP = ['trend', 'ray', 'channel', 'fib', 'measure'];
+const SQUARE_SNAP = ['rect', 'ellipse'];
+
+// 타임프레임 묶음 (도형마다 어느 묶음에서 보일지 정할 수 있다)
+export const VISIBILITY_GROUPS = [
+  { id: 'min', label: '분', test: (s) => s < 3600 },
+  { id: 'hour', label: '시간', test: (s) => s >= 3600 && s < 86400 },
+  { id: 'day', label: '일', test: (s) => s >= 86400 && s < 604800 },
+  { id: 'week', label: '주', test: (s) => s >= 604800 },
+];
+
+// 수평선처럼 가격 눈금에 가격을, 수직선처럼 시간 눈금에 시간을 늘 표시하는 도형
+const PRICE_LABEL = ['hline', 'hray', 'crossline'];
+const TIME_LABEL = ['vline', 'crossline'];
 const DRAG_MIN_PX = 6; // 이만큼 끌었으면 "끌어서 그리기"로 본다
 
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const FIB_COLORS = ['#787b86', '#f23645', '#ff9800', '#4caf50', '#089981', '#2196f3', '#787b86'];
 const HISTORY_LIMIT = 50;
-const MAGNET_PX = 30;
+const MAGNET_PX = 30; // 약한 자석: 이 거리 안이면 붙인다
 
 const toolPoints = (type) => TOOLS.find((t) => t.id === type).points;
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -52,12 +65,13 @@ function extendTo(a, b, width) {
 }
 
 export class DrawingManager {
-  constructor({ chart, getBars, getStep, formatPrice, onChange, onSelect, onToolChange }) {
-    Object.assign(this, { chart, getBars, getStep, formatPrice, onChange, onSelect, onToolChange });
+  constructor({ chart, getBars, getStep, formatPrice, formatTime, onChange, onSelect, onToolChange, onTextCreated }) {
+    Object.assign(this, { chart, getBars, getStep, formatPrice, formatTime, onChange, onSelect, onToolChange, onTextCreated });
     this.drawings = [];
     this.tool = 'cursor';
-    this.magnet = false;
-    this.selectedId = null;
+    this.magnet = 'off'; // off | weak | strong
+    this.selectedId = null; // 마지막으로 고른 도형 (떠 있는 막대·설정 창 대상)
+    this.selection = new Set(); // 함께 선택된 도형들 (Ctrl+클릭)
     this.locked = false; // 잠금: 도형을 옮기거나 바꿀 수 없음
     this.hidden = false; // 숨기기: 도형을 그리지 않음
     this.stay = false; // 드로잉 모드 유지: 다 그려도 같은 도구로 남는다
@@ -79,6 +93,8 @@ export class DrawingManager {
         zOrder: () => 'top',
         renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.#draw(context, mediaSize)) }),
       }],
+      priceAxisViews: () => this.#axisViews('price'),
+      timeAxisViews: () => this.#axisViews('time'),
     };
   }
 
@@ -134,18 +150,28 @@ export class DrawingManager {
   }
 
   select(id) {
-    if (id === this.selectedId) return;
+    if (id === this.selectedId && this.selection.size <= 1) return;
     this.selectedId = id;
+    this.selection = new Set(id ? [id] : []);
+    this.onSelect(this.selected);
+    this.update();
+  }
+
+  // Ctrl+클릭: 선택에 넣거나 뺀다
+  toggleSelect(id) {
+    if (this.selection.has(id)) this.selection.delete(id); else this.selection.add(id);
+    this.selectedId = this.selection.has(id) ? id : [...this.selection].at(-1) ?? null;
     this.onSelect(this.selected);
     this.update();
   }
 
   get selected() { return this.drawings.find((d) => d.id === this.selectedId) ?? null; }
+  get selectedAll() { return this.drawings.filter((d) => this.selection.has(d.id)); }
 
   removeSelected() {
-    if (!this.selected) return;
+    if (!this.selection.size) return;
     this.#snapshot();
-    this.drawings = this.drawings.filter((d) => d.id !== this.selectedId);
+    this.drawings = this.drawings.filter((d) => !this.selection.has(d.id));
     this.select(null);
     this.#commit();
   }
@@ -158,12 +184,18 @@ export class DrawingManager {
     this.#commit();
   }
 
-  updateSelected(patch) {
+  // 모양(색·두께 등)은 선택된 모든 도형에, 좌표·글자는 마지막으로 고른 도형에만 적용
+  updateSelected(patch, onlyPrimary = false) {
     if (!this.selected) return;
     this.#snapshot();
-    Object.assign(this.selected, patch);
+    for (const d of onlyPrimary ? [this.selected] : this.selectedAll) Object.assign(d, structuredClone(patch));
     this.onSelect(this.selected);
     this.#commit();
+  }
+
+  #visible(d) {
+    const step = this.getStep();
+    return !(d.hiddenOn ?? []).some((g) => VISIBILITY_GROUPS.find((x) => x.id === g)?.test(step));
   }
 
   #add(drawing) {
@@ -173,6 +205,9 @@ export class DrawingManager {
     this.select(drawing.id);
     this.#commit();
   }
+
+  // 좌표 직접 입력용
+  pointToPixel(pt) { return this.#toPixel(pt); }
 
   // 같은 자리에서 조금 옮긴 복사본
   #copyOf(d, shiftBars = 0) {
@@ -184,10 +219,12 @@ export class DrawingManager {
   copySelected() { if (this.selected) this.clipboard = structuredClone(this.selected); }
   paste() { if (this.clipboard) this.#add(this.#copyOf(this.clipboard, 5)); }
 
+  // 마우스 아래의 도형 (손잡이 위면 'handle'도 돌려줘서 커서 모양을 바꾼다)
   setHover(point, touch) {
-    const id = this.tool === 'cursor' && point ? this.hitTest(point, touch ? 14 : 7)?.drawing.id ?? null : null;
+    const hit = this.tool === 'cursor' && point ? this.hitTest(point, touch ? 14 : 7) : null;
+    const id = hit?.drawing.id ?? null;
     if (id !== this.hoverId) { this.hoverId = id; this.update(); }
-    return id;
+    return hit;
   }
 
   // ---------- 좌표 변환 ----------
@@ -223,18 +260,26 @@ export class DrawingManager {
   }
 
   // 화면 좌표 -> 점. 가로는 봉 가운데에 맞추고, 자석이 켜져 있으면 가까운 시가·고가·저가·종가에 붙인다.
-  #fromPixel({ x, y }, snapX = true) {
+  // 자석 모드. Ctrl(⌘)을 누르고 있는 동안은 잠깐 반대로 (꺼져 있으면 켜고, 켜져 있으면 끈다).
+  #magnetMode(invert) {
+    if (!invert) return this.magnet;
+    return this.magnet === 'off' ? 'weak' : 'off';
+  }
+
+  #fromPixel({ x, y }, snapX = true, magnetInvert = false) {
     let logical = this.chart.timeScale().coordinateToLogical(x);
     const price = this.series.coordinateToPrice(y);
     if (logical == null || price == null || !this.getBars().length) return null;
     if (snapX) logical = Math.round(logical);
     const point = { time: this.#logicalToTime(logical), price };
-    const bar = this.magnet && this.getBars()[logical];
+    const mode = this.#magnetMode(magnetInvert);
+    const bar = mode !== 'off' && snapX && this.getBars()[logical];
     if (bar) {
       const nearest = [bar.open, bar.high, bar.low, bar.close]
         .map((p) => ({ p, dy: Math.abs(this.series.priceToCoordinate(p) - y) }))
         .sort((a, b) => a.dy - b.dy)[0];
-      if (nearest.dy <= MAGNET_PX) point.price = nearest.p;
+      // 약한 자석은 가까울 때만, 강한 자석은 항상 붙인다
+      if (mode === 'strong' || nearest.dy <= MAGNET_PX) point.price = nearest.p;
     }
     return point;
   }
@@ -247,30 +292,32 @@ export class DrawingManager {
 
   // ---------- 입력 ----------
   // 커서 모드에서 누르면 선택, 그리기 모드에서는 점 하나를 찍는다.
-  handleClick(point, opts = {}) {
+  // keys: { shift, ctrl, touch }
+  handleClick(point, keys = {}) {
     if (!point) return;
     if (this.tool === 'cursor') {
-      this.select(this.hitTest(point, opts.touch ? 14 : 7)?.drawing.id ?? null);
+      const id = this.hitTest(point, keys.touch ? 14 : 7)?.drawing.id ?? null;
+      if (keys.ctrl && id) this.toggleSelect(id); else this.select(id);
       return;
     }
-    this.#addPoint(point, opts.shift);
+    this.#addPoint(point, keys);
   }
 
   // 트레이딩뷰처럼 두 가지로 그린다: 점마다 클릭하거나, 누른 채 끌었다가 떼기.
-  pressDraw(point, shift) {
+  pressDraw(point, keys = {}) {
     this.press = point;
-    this.#addPoint(point, shift);
+    this.#addPoint(point, keys);
   }
 
-  releaseDraw(point, shift) {
+  releaseDraw(point, keys = {}) {
     const start = this.press;
     this.press = null;
     if (!start || !this.draft || !point) return;
-    if (Math.hypot(point.x - start.x, point.y - start.y) >= DRAG_MIN_PX) this.#addPoint(point, shift);
+    if (Math.hypot(point.x - start.x, point.y - start.y) >= DRAG_MIN_PX) this.#addPoint(point, keys);
   }
 
-  #addPoint(point, shift) {
-    const pt = this.#constrain(this.#fromPixel(point), shift);
+  #addPoint(point, keys) {
+    const pt = this.#constrain(this.#fromPixel(point, true, keys.ctrl), keys.shift);
     if (!pt) return;
     // 같은 자리를 두 번 누른 경우(더블클릭 등)는 무시한다.
     const prev = this.draft?.points.at(-1);
@@ -283,12 +330,17 @@ export class DrawingManager {
     this.#finishDraft();
   }
 
-  // Shift: 직전 점에서 45° 단위 방향으로 맞춘다 (화면 기준)
+  // Shift: 직전 점에서 45° 단위 방향으로 (추세선 등), 정사각형·원으로 (사각형·타원). 화면 기준.
   #constrain(pt, shift) {
     const anchor = this.draft?.points.at(-1);
-    if (!pt || !shift || !anchor || !ANGLE_SNAP.includes(this.tool)) return pt;
+    if (!pt || !shift || !anchor) return pt;
     const a = this.#toPixel(anchor), p = this.#toPixel(pt);
     if (!a || !p) return pt;
+    if (SQUARE_SNAP.includes(this.tool)) {
+      const side = Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y));
+      return this.#fromPixel({ x: a.x + Math.sign(p.x - a.x || 1) * side, y: a.y + Math.sign(p.y - a.y || 1) * side }, false) ?? pt;
+    }
+    if (!ANGLE_SNAP.includes(this.tool)) return pt;
     const len = Math.hypot(p.x - a.x, p.y - a.y);
     const angle = Math.round(Math.atan2(p.y - a.y, p.x - a.x) / (Math.PI / 4)) * (Math.PI / 4);
     const snapped = this.#fromPixel({ x: a.x + len * Math.cos(angle), y: a.y + len * Math.sin(angle) });
@@ -301,9 +353,8 @@ export class DrawingManager {
     this.draft = null;
     this.hover = null;
     if (drawing.type === 'text') {
-      const text = window.prompt('텍스트를 입력하세요');
-      if (!text?.trim()) return this.setTool(this.stay ? this.tool : 'cursor');
-      drawing.text = text.trim();
+      // 트레이딩뷰처럼 놓자마자 글자 편집 창을 연다 (빈 채로 닫으면 기본 글자가 남는다)
+      drawing.text = '텍스트';
       drawing.fontSize = 14;
     }
     if (drawing.type === 'ray') drawing.extendRight = true;
@@ -325,6 +376,7 @@ export class DrawingManager {
     }
     this.setTool('cursor');
     this.#add(drawing);
+    if (drawing.type === 'text') this.onTextCreated?.(drawing);
   }
 
   cancelDraft() {
@@ -336,39 +388,55 @@ export class DrawingManager {
     return true;
   }
 
-  handleMove(point, shift) {
+  handleMove(point, keys = {}) {
     if (!this.draft || !point) return;
-    this.hover = this.#constrain(this.#fromPixel(point), shift);
+    this.hover = this.#constrain(this.#fromPixel(point, true, keys.ctrl), keys.shift);
     this.update();
   }
 
   // 드래그 시작. 도형(또는 손잡이)을 잡았으면 true를 돌려준다 — 그러면 차트 이동을 막는다.
   // clone: Ctrl(⌘)을 누른 채 끌면 복사본을 끌어 놓는다.
-  beginDrag(point, touch, clone = false) {
+  // Ctrl을 누른 채 몸통을 끌면 복사본을 끌어 놓고, 끌지 않고 떼면 (탭 처리에서) 선택에 넣거나 뺀다.
+  beginDrag(point, touch, ctrl = false) {
     if (this.tool !== 'cursor' || this.locked || this.hidden) return false;
-    let hit = this.hitTest(point, touch ? 14 : 7);
+    const hit = this.hitTest(point, touch ? 14 : 7);
     if (!hit) return false;
-    this.select(hit.drawing.id);
+    if (!ctrl && !this.selection.has(hit.drawing.id)) this.select(hit.drawing.id);
     if (hit.drawing.locked) return false; // 잠긴 도형은 고르기만 되고 움직이지 않는다
-    if (clone) {
-      const copy = this.#copyOf(hit.drawing);
-      this.#snapshot();
-      this.drawings.push(copy);
-      this.select(copy.id);
-      hit = { drawing: copy, handle: null };
-    }
-    this.drag = { hit, start: this.#fromPixel(point, false), original: structuredClone(hit.drawing.points), moved: clone };
+    // 몸통을 끌면 함께 선택된 도형도 같이 움직인다
+    const group = hit.handle == null && this.selection.has(hit.drawing.id) ? this.selectedAll.filter((d) => !d.locked) : [hit.drawing];
+    this.drag = {
+      hit, startPx: point, start: this.#fromPixel(point, false),
+      originals: new Map(group.map((d) => [d.id, structuredClone(d.points)])),
+      cloneOnMove: ctrl && hit.handle == null, moved: false,
+    };
     return true;
   }
 
-  dragTo(point, shift = false) {
+  dragTo(point, keys = {}) {
     if (!this.drag) return;
-    const { hit, start, original } = this.drag;
-    const now = this.#fromPixel(point, hit.handle != null ? true : false);
+    const { hit, start, startPx } = this.drag;
+    // Shift로 몸통을 끌면 가로 또는 세로로만
+    if (keys.shift && hit.handle == null) {
+      point = Math.abs(point.x - startPx.x) >= Math.abs(point.y - startPx.y) ? { x: point.x, y: startPx.y } : { x: startPx.x, y: point.y };
+    }
+    const now = this.#fromPixel(point, hit.handle != null, hit.handle != null && keys.ctrl);
     if (!now || !start) return;
-    if (!this.drag.moved) { this.#snapshot(); this.drag.moved = true; }
+    if (!this.drag.moved) {
+      this.#snapshot();
+      this.drag.moved = true;
+      if (this.drag.cloneOnMove) {
+        // 처음 움직일 때 복사본을 만들어 그것을 끈다 (원본은 그 자리에)
+        const copy = this.#copyOf(hit.drawing);
+        this.drawings.push(copy);
+        this.select(copy.id);
+        this.drag.hit = { drawing: copy, handle: null };
+        this.drag.originals = new Map([[copy.id, structuredClone(copy.points)]]);
+      }
+    }
+    const shift = keys.shift;
     if (hit.handle != null) {
-      const d = hit.drawing;
+      const d = this.drag.hit.drawing;
       d.points[hit.handle] = now;
       if (shift && ANGLE_SNAP.includes(d.type) && d.points.length >= 2) {
         // 손잡이를 Shift와 함께 끌면 반대쪽 점 기준으로 45° 단위
@@ -387,7 +455,10 @@ export class DrawingManager {
       }
     } else {
       const dt = now.time - start.time, dp = now.price - start.price;
-      hit.drawing.points = original.map((p) => ({ time: p.time + dt, price: p.price + dp }));
+      for (const d of this.drawings) {
+        const orig = this.drag.originals.get(d.id);
+        if (orig) d.points = orig.map((p) => ({ time: p.time + dt, price: p.price + dp }));
+      }
     }
     this.update();
   }
@@ -406,14 +477,14 @@ export class DrawingManager {
     const width = this.chart.timeScale().width();
     // 선택되었거나 마우스가 올라간 도형의 손잡이가 가장 우선
     for (const d of [this.selected, this.drawings.find((x) => x.id === this.hoverId)]) {
-      if (!d || NO_HANDLES.includes(d.type)) continue;
+      if (!d || NO_HANDLES.includes(d.type) || !this.#visible(d)) continue;
       const px = d.points.map((p) => this.#toPixel(p));
       const handle = px.findIndex((p) => p && Math.hypot(p.x - point.x, p.y - point.y) <= tolerance + 4);
       if (handle >= 0) return { drawing: d, handle };
     }
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
-      if (this.#hits(d, point, tolerance, width)) return { drawing: d, handle: null };
+      if (this.#visible(d) && this.#hits(d, point, tolerance, width)) return { drawing: d, handle: null };
     }
     return null;
   }
@@ -465,10 +536,32 @@ export class DrawingManager {
     return b.x === a.x ? a.y : a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x);
   }
 
+  // ---------- 가격·시간 눈금 표시 ----------
+  // 수평선류는 가격을, 수직선류는 시간을 늘 표시하고, 선택한 도형은 모든 점의 가격·시간을 표시한다.
+  #axisViews(axis) {
+    if (this.hidden || !this.series || !this.getBars().length) return [];
+    const views = [];
+    const add = (coordinate, text, color) => views.push({
+      coordinate: () => coordinate, text: () => text, textColor: () => '#ffffff', backColor: () => color, visible: () => true, tickVisible: () => true,
+    });
+    for (const d of this.drawings) {
+      if (!this.#visible(d)) continue;
+      const always = axis === 'price' ? PRICE_LABEL.includes(d.type) : TIME_LABEL.includes(d.type);
+      const pts = this.selection.has(d.id) ? d.points : always ? d.points.slice(0, 1) : [];
+      for (const pt of pts) {
+        const px = this.#toPixel(pt);
+        if (!px) continue;
+        if (axis === 'price') add(px.y, this.formatPrice(pt.price), d.color);
+        else add(px.x, this.formatTime(pt.time), d.color);
+      }
+    }
+    return views;
+  }
+
   // ---------- 그리기 ----------
   #draw(ctx, size) {
     if (!this.series || !this.getBars().length) return;
-    const items = this.hidden ? [] : [...this.drawings];
+    const items = this.hidden ? [] : this.drawings.filter((d) => this.#visible(d));
     if (this.draft && this.hover) items.push({ ...this.draft, points: [...this.draft.points, this.hover], draft: true });
     else if (this.draft) items.push({ ...this.draft, draft: true });
     ctx.save();
@@ -481,7 +574,7 @@ export class DrawingManager {
       ctx.lineWidth = (d.width ?? 2) + (hovered ? 1 : 0);
       ctx.setLineDash(LINE_STYLES[d.lineStyle] ?? []);
       this.#shape(ctx, d, px, size);
-      if (d.id === this.selectedId || d.draft || hovered) this.#handles(ctx, d, px);
+      if (this.selection.has(d.id) || d.draft || hovered) this.#handles(ctx, d, px);
     }
     ctx.restore();
   }
@@ -489,6 +582,18 @@ export class DrawingManager {
   #shape(ctx, d, px, size) {
     const [a, b, c] = px;
     const line = (p, q) => { ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke(); };
+    // tip 쪽에 화살촉 (from -> tip 방향)
+    const arrowHead = (tip, from) => {
+      const ang = Math.atan2(tip.y - from.y, tip.x - from.x), len = 6 + ctx.lineWidth * 2;
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(tip.x - len * Math.cos(ang - 0.45), tip.y - len * Math.sin(ang - 0.45));
+      ctx.lineTo(tip.x, tip.y);
+      ctx.lineTo(tip.x - len * Math.cos(ang + 0.45), tip.y - len * Math.sin(ang + 0.45));
+      ctx.stroke();
+      ctx.restore();
+    };
     const label = (text, x, y, align = 'left', bg = null) => {
       ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       ctx.textAlign = align;
@@ -513,24 +618,48 @@ export class DrawingManager {
       case 'trend': case 'ray': {
         if (!b) break;
         const right = d.extendRight ?? d.type === 'ray', left = d.extendLeft;
-        line(left ? extendTo(b, a, size.width) : a, right ? extendTo(a, b, size.width) : b);
+        const p1 = left ? extendTo(b, a, size.width) : a, p2 = right ? extendTo(a, b, size.width) : b;
+        line(p1, p2);
+        if (d.arrowLeft) arrowHead(a, b);
+        if (d.arrowRight) arrowHead(b, a);
+        if (d.text) {
+          // 선 가운데, 선 기울기를 따라 글자
+          ctx.save();
+          ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2);
+          let ang = Math.atan2(b.y - a.y, b.x - a.x);
+          if (Math.abs(ang) > Math.PI / 2) ang += Math.PI;
+          ctx.rotate(ang);
+          ctx.font = '13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(d.text, 0, -5);
+          ctx.restore();
+        }
+        if (d.stats && d.points.length === 2) {
+          const [q1, q2] = d.points;
+          const diff = q2.price - q1.price;
+          const nBars = Math.round(this.#timeToLogical(q2.time) - this.#timeToLogical(q1.time));
+          const angle = (Math.atan2(-(b.y - a.y), b.x - a.x) * 180) / Math.PI;
+          const parts = [];
+          if (d.stats.includes('price')) parts.push(`${diff >= 0 ? '+' : ''}${this.formatPrice(diff)} (${diff >= 0 ? '+' : ''}${((diff / q1.price) * 100).toFixed(2)}%)`);
+          if (d.stats.includes('bars')) parts.push(`${nBars}봉, ${formatDuration(Math.abs(q2.time - q1.time))}`);
+          if (d.stats.includes('angle')) parts.push(`${angle.toFixed(1)}°`);
+          if (parts.length) label(parts.join(' · '), b.x + 8, b.y + (b.y >= a.y ? 14 : -14), 'left', '#363a45');
+        }
         break;
       }
       case 'hline':
         line({ x: 0, y: a.y }, { x: size.width, y: a.y });
-        label(this.formatPrice(d.points[0].price), size.width - 4, a.y, 'right', d.color);
         break;
       case 'vline':
         line({ x: a.x, y: 0 }, { x: a.x, y: size.height });
         break;
       case 'hray':
         line(a, { x: size.width, y: a.y });
-        label(this.formatPrice(d.points[0].price), size.width - 4, a.y, 'right', d.color);
         break;
       case 'crossline':
         line({ x: 0, y: a.y }, { x: size.width, y: a.y });
         line({ x: a.x, y: 0 }, { x: a.x, y: size.height });
-        label(this.formatPrice(d.points[0].price), size.width - 4, a.y, 'right', d.color);
         break;
       case 'ellipse': {
         if (!b) break;
@@ -664,7 +793,7 @@ export class DrawingManager {
         const w = Math.max(...lines.map((l) => ctx.measureText(l).width));
         lines.forEach((l, i) => ctx.fillText(l, a.x, a.y + i * lh));
         this.textBoxes.set(d.id, { x: a.x, y: a.y, w, h: lines.length * lh });
-        if (d.id === this.selectedId || d.id === this.hoverId) {
+        if (this.selection.has(d.id) || d.id === this.hoverId) {
           ctx.save();
           ctx.lineWidth = 1;
           ctx.setLineDash([3, 3]);
