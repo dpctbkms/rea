@@ -66,7 +66,8 @@ const TYPE = { infoline: 'trend', extended: 'trend', trendangle: 'trend' };
         } else {
           for (let k = 0; k < n; k++) await p.mouse.click(...at(i, k));
         }
-        await p.waitForTimeout(100);
+        // 휴대폰 흉내에서는 손가락을 뗀 직후(0.2초 안) 다음 탭의 click이 빠질 때가 있어 사람처럼 잠깐 쉰다
+        await p.waitForTimeout(mode === 'touch' ? 400 : 100);
         if (await p.isVisible('#text-editor')) { await p.keyboard.type('메모'); await p.keyboard.press('Enter'); }
         expected.push(TYPE[id] ?? id);
         i++;

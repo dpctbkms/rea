@@ -3,6 +3,7 @@ import {
   CrosshairMode, ColorType, LineStyle, PriceScaleMode,
 } from 'lightweight-charts';
 import { FEEDS, INTERVALS } from './feeds/index.js';
+import { coinName } from './feeds/common.js';
 import { heikinAshi } from './indicators.js';
 import { STUDIES, CATEGORIES, studyDef, newStudy, studyTitle, migrateStudies, DEFAULT_STUDIES } from './studies.js';
 import { DrawingManager, TOOLS, COLORS, LINE_STYLES, VISIBILITY_GROUPS, FIB_LEVELS, canAngleLock } from './drawings.js';
@@ -30,6 +31,7 @@ const settings = Object.assign(
     autoScale: true,
     panelOpen: true,
     toolsOpen: false, // 휴대폰: 왼쪽 그리기 도구 막대를 펼쳤는지 (연필 버튼)
+    tab: 'chart', // 휴대폰 아래 탭: watch | chart | menu
     legendCollapsed: false, // 지표 범례 접기
     chart: {}, // 차트 설정 (CHART_DEFAULTS 참고)
   },
@@ -86,6 +88,8 @@ let loadId = 0;
 document.documentElement.dataset.theme = settings.theme;
 const chart = createChart($('#chart'), {
   autoSize: true,
+  // 차트 라이브러리 출처 표시는 차트 위 로고 대신 메뉴 > 정보와 차트 설정 창 아래에 둔다 (라이선스 조건)
+  layout: { attributionLogo: false },
   crosshair: { mode: CrosshairMode.Normal },
   timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 8, borderVisible: false },
   rightPriceScale: { borderVisible: false },
@@ -109,6 +113,8 @@ function applyTheme() {
       horzLine: { labelBackgroundColor: '#363a45', visible: lines, labelVisible: settings.cursorMode !== 'arrow' },
     },
   });
+  // 휴대폰 상단 상태 표시줄 색 (앱으로 설치했을 때)
+  $('meta[name="theme-color"]').content = css('--panel');
   $('.chart-wrap').classList.toggle('arrow-cursor', settings.cursorMode === 'arrow');
   $('.chart-wrap').classList.toggle('eraser-cursor', settings.cursorMode === 'eraser');
 }
@@ -267,7 +273,7 @@ async function loadSymbol() {
   if (id !== loadId) return;
   const custom = feed.allowCustom && settings.customFor === feed.id;
   if (markets && !custom && !markets.some((m) => m.id === settings.coin)) settings.coin = feed.coins[0];
-  $('#symbol-label').textContent = marketLabel();
+  renderSymbolBtn();
   document.title = `${marketLabel()} · Rea Chart`;
   try {
     bars = await feed.getBars(settings.coin, settings.interval);
@@ -284,7 +290,7 @@ async function loadSymbol() {
     feed = feedById('demo');
     markets = null;
     loadMarkets();
-    $('#symbol-label').textContent = marketLabel();
+    renderSymbolBtn();
     startTickers();
     bars = await feed.getBars(settings.coin, settings.interval);
   }
@@ -370,7 +376,7 @@ function updateLegend() {
   const cls = change >= 0 ? 'up' : 'down';
   const interval = INTERVALS.find((i) => i.id === settings.interval).label;
   // 휴대폰: 트레이딩뷰처럼 시가·고가·저가와 지표 값은 길게 눌러 십자선을 띄웠을 때만 보인다
-  const brief = usingTouch() && innerWidth <= 768 && !crosshairPoint;
+  const brief = usingTouch() && isApp() && !crosshairPoint;
   $('#legend').classList.toggle('values-hidden', brief);
 
   const head = $('#legend .head');
@@ -478,6 +484,10 @@ const ICONS = {
   camera: '<path d="M3 7h3l1.5-2h5L14 7h3v9H3z"/><circle cx="10" cy="11.5" r="3"/>',
   sun: '<circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4"/>',
   moon: '<path d="M16 12.5A7 7 0 017.5 4 7 7 0 1016 12.5z"/>',
+  search: '<circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/>',
+  list: '<path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.5" cy="5" r=".9" fill="currentColor"/><circle cx="3.5" cy="10" r=".9" fill="currentColor"/><circle cx="3.5" cy="15" r=".9" fill="currentColor"/>',
+  menu: '<path d="M3 5h14M3 10h14M3 15h14"/>',
+  chevron: '<path d="M8 5l5 5-5 5"/>',
   pencil: '<path d="M4 16l1-4 8.3-8.3a2 2 0 012.8 2.8L7.8 15z"/><path d="M12 5.5l2.5 2.5"/>',
   panel: '<rect x="3" y="3" width="14" height="14" rx="2"/><path d="M12 3v14M14 7h1M14 10h1M14 13h1"/>',
   star: '<path d="M10 2.8l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L2.8 8.1l5-.7z"/>',
@@ -520,6 +530,10 @@ const MAGNET_ITEMS = [{ id: 'weak', label: '약한 자석' }, { id: 'strong', la
 const toolInfo = (id, groupId) => (groupId === 'cursor' ? CURSORS.find((c) => c.id === id) : null)
   ?? TOOLS.find((t) => t.id === id) ?? CURSORS.find((c) => c.id === id) ?? MAGNET_ITEMS.find((m) => m.id === id) ?? REMOVE_ITEMS.find((m) => m.id === id);
 const altKey = (key) => (key ? `Alt+${key}` : '');
+
+// 휴대폰 화면 폭이면 트레이딩뷰 앱 같은 화면 (아래 탭, 아래에서 올라오는 메뉴)
+const appMedia = matchMedia('(max-width: 768px)');
+const isApp = () => appMedia.matches;
 
 // 마지막으로 쓴 입력. 손가락이면 트레이딩뷰 모바일처럼 십자선으로 그린다.
 let lastPointer = matchMedia('(hover: none)').matches ? 'touch' : 'mouse';
@@ -581,8 +595,8 @@ function renderTools() {
     `<button class="tool ${drawings.hidden ? 'active' : ''}" data-action="hide" title="${drawings.hidden ? '그림 보이기' : '그림 모두 숨기기'}" aria-label="숨기기" aria-pressed="${drawings.hidden}">${icon(drawings.hidden ? 'eyeOff' : 'eye')}</button>`,
     `<button class="tool" data-action="clear" title="그림 지우기" aria-label="지우기" aria-haspopup="menu">${icon('clear')}<span class="caret" data-flyout="remove" title="지우기 메뉴"></span></button>`,
   ].join('');
-  $('#undo-btn').disabled = !drawings.canUndo;
-  $('#redo-btn').disabled = !drawings.canRedo;
+  for (const b of document.querySelectorAll('.undo-btn')) b.disabled = !drawings.canUndo;
+  for (const b of document.querySelectorAll('.redo-btn')) b.disabled = !drawings.canRedo;
   $('.chart-wrap').classList.toggle('drawing', tool !== 'cursor');
   renderHint();
 }
@@ -887,7 +901,7 @@ function openDrawingSettings(tab = 'style') {
   if (tab === 'text') { const t = $('#ds-text'); t.focus(); t.select(); }
 }
 $('#drawing-settings-body').addEventListener('click', (e) => {
-  const tab = e.target.closest('[data-tab]');
+  const tab = e.target.closest('.tab[data-tab]');
   if (!tab) return;
   for (const b of drawingDialog.querySelectorAll('[data-tab]')) b.classList.toggle('active', b === tab);
   for (const p of drawingDialog.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab.dataset.tab;
@@ -1064,20 +1078,35 @@ function openPopover(anchor, html, onPick, at) {
   popover.innerHTML = html;
   popover.hidden = false;
   popoverAnchor = anchor;
-  const r = at ?? (() => { const b = anchor.getBoundingClientRect(); return { x: b.left, y: b.bottom + 4 }; })();
-  const w = popover.offsetWidth, h = popover.offsetHeight;
-  popover.style.left = `${Math.max(8, Math.min(r.x, innerWidth - w - 8))}px`;
-  popover.style.top = `${Math.max(8, Math.min(r.y, innerHeight - h - 8))}px`;
+  // 휴대폰: 트레이딩뷰 앱처럼 아래에서 올라오는 시트
+  const sheet = isApp();
+  popover.classList.toggle('sheet', sheet);
+  $('#sheet-backdrop').hidden = !sheet;
+  if (sheet) {
+    popover.style.left = popover.style.top = '';
+  } else {
+    const r = at ?? (() => { const b = anchor.getBoundingClientRect(); return { x: b.left, y: b.bottom + 4 }; })();
+    const w = popover.offsetWidth, h = popover.offsetHeight;
+    popover.style.left = `${Math.max(8, Math.min(r.x, innerWidth - w - 8))}px`;
+    popover.style.top = `${Math.max(8, Math.min(r.y, innerHeight - h - 8))}px`;
+  }
   popover.onclick = (e) => {
     const item = e.target.closest('[data-value]');
     if (!item) return;
     if (onPick(item.dataset.value, e) !== 'keep') closePopover();
   };
 }
-function closePopover() { popover.hidden = true; popoverAnchor = null; }
+function closePopover() {
+  popover.hidden = true;
+  popoverAnchor = null;
+  $('#sheet-backdrop').hidden = true;
+}
 document.addEventListener('pointerdown', (e) => {
+  // 시트 뒤 어두운 배경은 click에서 닫는다 (누르자마자 닫으면 손가락 밑 차트가 그 탭을 받는다)
+  if (e.target.id === 'sheet-backdrop') return;
   if (!popover.hidden && !popover.contains(e.target) && !(popoverAnchor && popoverAnchor.contains(e.target))) closePopover();
 }, true);
+$('#sheet-backdrop').addEventListener('click', closePopover);
 
 const intervalLabel = (id) => INTERVALS.find((i) => i.id === id).label;
 
@@ -1087,6 +1116,8 @@ function renderIntervals() {
   $('#intervals').innerHTML = favs.map((i) =>
     `<button data-interval="${i.id}" class="${i.id === current ? 'active' : ''}">${i.label}</button>`).join('')
     + `<button id="interval-more" class="more ${settings.favorites.includes(current) ? '' : 'active'}" aria-haspopup="menu" title="모든 타임프레임">${settings.favorites.includes(current) ? '' : intervalLabel(current)}<span class="chev"></span></button>`;
+  // 휴대폰: 트레이딩뷰 앱처럼 지금 타임프레임 하나만 보이고, 누르면 전체 목록
+  $('#interval-btn').innerHTML = `${intervalLabel(current)}<span class="chev"></span>`;
 }
 
 function changeInterval(id) {
@@ -1103,7 +1134,12 @@ $('#intervals').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   if (btn.dataset.interval) return changeInterval(btn.dataset.interval);
-  // 전체 목록: 누르면 바꾸고, 별을 누르면 툴바 즐겨찾기에 넣거나 뺀다
+  openIntervalMenu(btn);
+});
+$('#interval-btn').addEventListener('click', (e) => openIntervalMenu(e.currentTarget));
+
+// 전체 목록: 누르면 바꾸고, 별을 누르면 툴바 즐겨찾기에 넣거나 뺀다
+function openIntervalMenu(btn) {
   const groups = [['분', ['1m', '5m', '15m']], ['시간', ['1h', '4h']], ['일·주', ['1d', '1w']]];
   openPopover(btn, groups.map(([title, ids]) => `<div class="pop-title">${title}</div>` + ids.map((id) => `
     <div class="pop-item ${id === settings.interval ? 'active' : ''}" data-value="${id}" role="menuitem">
@@ -1120,7 +1156,7 @@ $('#intervals').addEventListener('click', (e) => {
     }
     changeInterval(value);
   });
-});
+}
 
 const CHART_TYPES = [
   { id: 'bars', label: '바' },
@@ -1147,12 +1183,17 @@ $('#chart-type-btn').addEventListener('click', (e) => {
   });
 });
 
-$('#undo-btn').innerHTML = icon('undo');
-$('#redo-btn').innerHTML = icon('redo');
-$('#undo-btn').title = `실행 취소 (${shortcut('Z')})`;
-$('#redo-btn').title = `다시 실행 (${shortcut('Y')})`;
-$('#undo-btn').addEventListener('click', () => drawings.undo());
-$('#redo-btn').addEventListener('click', () => drawings.redo());
+// 실행 취소·다시 실행: 컴퓨터는 위 막대, 휴대폰은 차트 아래 막대
+for (const b of document.querySelectorAll('.undo-btn')) {
+  b.innerHTML = icon('undo');
+  b.title = `실행 취소 (${shortcut('Z')})`;
+  b.addEventListener('click', () => drawings.undo());
+}
+for (const b of document.querySelectorAll('.redo-btn')) {
+  b.innerHTML = icon('redo');
+  b.title = `다시 실행 (${shortcut('Y')})`;
+  b.addEventListener('click', () => drawings.redo());
+}
 
 $('#settings-btn').innerHTML = icon('gear');
 $('#fullscreen-btn').innerHTML = icon('fullscreen');
@@ -1378,6 +1419,8 @@ function renderSearch() {
 
 function selectCoin(coin) {
   dialog.close();
+  // 휴대폰 관심 목록에서 고르면 차트 화면으로
+  if (isApp() && settings.tab !== 'chart') setTab('chart');
   if (coin === settings.coin) return;
   settings.coin = coin;
   // 목록에 없는 종목을 직접 고른 경우, 이 피드에서는 그대로 둔다.
@@ -1474,19 +1517,32 @@ document.addEventListener('keydown', (e) => {
 const tickers = new Map();
 
 function renderWatchlist() {
-  $('#watch-title').textContent = `관심 목록 · ${feed.name}`;
+  $('#watch-title').textContent = isApp() ? '관심 목록' : `관심 목록 · ${feed.name}`;
   const listed = markets && new Set(markets.map((m) => m.id));
+  const names = markets && new Map(markets.map((m) => [m.id, m.name]));
   $('#watch-list').innerHTML = feed.coins.filter((c) => !listed || listed.has(c)).map((coin) => {
     const t = tickers.get(coin);
     const cls = t ? (t.changePct >= 0 ? 'up' : 'down') : '';
     const digits = t ? priceFormatFor(t.price).precision : 0;
     const diff = t ? t.price - t.price / (1 + t.changePct / 100) : 0;
+    const name = names?.get(coin) || coinName(coin) || feed.market(coin);
     return `<li data-coin="${coin}" class="${coin === settings.coin ? 'active' : ''}">
-      <span class="sym">${coin}</span>
-      <span>${t ? fmt(t.price, digits) : '—'}</span>
-      <span class="${cls}">${t ? `${diff >= 0 ? '+' : ''}${fmt(diff, digits)}` : ''}</span>
-      <span class="${cls}">${t ? `${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : ''}</span></li>`;
+      <span class="sym">${coinLogo(coin)}<span class="sym-text"><b>${coin}</b><small>${name}</small></span></span>
+      <span class="last">${t ? fmt(t.price, digits) : '—'}</span>
+      <span class="chg ${cls}">${t ? `${diff >= 0 ? '+' : ''}${fmt(diff, digits)}` : ''}</span>
+      <span class="pct ${cls}">${t ? `${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : ''}</span></li>`;
   }).join('');
+}
+
+// 종목 로고 자리: 트레이딩뷰처럼 동그란 표시 (로고 그림 대신 이름 첫 글자와 종목마다 다른 색)
+function coinLogo(coin, cls = '') {
+  let h = 0;
+  for (const ch of coin) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `<span class="coin-logo ${cls}" style="--h:${h}" aria-hidden="true">${coin.replace(/[^A-Z0-9가-힣]/gi, '').slice(0, 1)}</span>`;
+}
+function renderSymbolBtn() {
+  $('#symbol-label').textContent = marketLabel();
+  $('#symbol-logo').outerHTML = coinLogo(settings.coin, 'app-only').replace('<span class="coin-logo', '<span id="symbol-logo" class="coin-logo');
 }
 $('#watch-list').addEventListener('click', (e) => {
   const li = e.target.closest('li');
@@ -1539,12 +1595,12 @@ function renderDetails() {
 function setPanel(open) {
   settings.panelOpen = open;
   save();
-  $('#side-panel').hidden = !open;
   $('#panel-btn').classList.toggle('active', open);
   $('#panel-btn').setAttribute('aria-pressed', open);
-  if (open) renderDetails();
+  applyPanels();
 }
 $('#panel-btn').innerHTML = icon('panel');
+$('#panel-btn').classList.toggle('active', settings.panelOpen);
 $('#panel-btn').addEventListener('click', () => setPanel(!settings.panelOpen));
 
 // ---------- 상태 표시줄 ----------
@@ -1601,6 +1657,8 @@ $('#key-btn').addEventListener('click', openKeyDialog);
 // ---------- 거래소 선택 ----------
 function switchFeed(id) {
   settings.source = id;
+  $('#source').value = id;
+  $('#watch-source').value = id;
   feed = feedById(id);
   feedError = null;
   markets = null;
@@ -1613,6 +1671,9 @@ function switchFeed(id) {
 
 $('#source').innerHTML = FEEDS.map((f) => `<option value="${f.id}">${f.name}</option>`).join('');
 $('#source').value = feed.id;
+$('#watch-source').innerHTML = $('#source').innerHTML;
+$('#watch-source').value = feed.id;
+$('#watch-source').hidden = forceDemo;
 $('#source').hidden = forceDemo;
 $('#key-btn').hidden = forceDemo || !feed.needsKey;
 $('#source').addEventListener('change', (e) => switchFeed(e.target.value));
@@ -1733,13 +1794,129 @@ document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('#legend .study')) for (const r of $('#legend').querySelectorAll('.study.open')) r.classList.remove('open');
 }, true);
 
+// ---------- 휴대폰 앱 화면 (트레이딩뷰 앱처럼 아래 탭: 관심 목록 · 차트 · 메뉴) ----------
+function setTab(tab) {
+  settings.tab = tab;
+  save();
+  document.body.dataset.screen = tab;
+  for (const b of document.querySelectorAll('.tabbar [data-tab]')) {
+    b.classList.toggle('active', b.dataset.tab === tab);
+    b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false');
+  }
+  closePopover();
+  closeFlyout();
+  applyPanels();
+  if (tab === 'menu') renderMenu();
+}
+// 오른쪽 관심 목록: 컴퓨터는 패널 버튼으로, 휴대폰은 관심 목록 탭에서만
+function applyPanels() {
+  $('#side-panel').hidden = isApp() ? settings.tab !== 'watch' : !settings.panelOpen;
+  renderWatchlist();
+  if (!$('#side-panel').hidden) renderDetails();
+}
+const TAB_ICONS = { watch: 'list', chart: 'candles', menu: 'menu' };
+for (const b of document.querySelectorAll('.tabbar [data-tab]')) {
+  b.querySelector('.tab-icon').innerHTML = icon(TAB_ICONS[b.dataset.tab], 22);
+  b.addEventListener('click', () => setTab(b.dataset.tab));
+}
+appMedia.addEventListener('change', () => { applyPanels(); closePopover(); updateLegend(); });
+
+$('#watch-search').innerHTML = icon('search');
+$('#watch-search').addEventListener('click', () => openSearch());
+$('#watch-source').addEventListener('change', (e) => switchFeed(e.target.value));
+
+// 휴대폰 위 막대의 ⋯: 컴퓨터에서 위 막대 오른쪽에 있는 버튼들
+$('#more-btn').innerHTML = icon('more');
+$('#more-btn').addEventListener('click', (e) => {
+  const items = [
+    ['settings', 'gear', '차트 설정'],
+    ['theme', settings.theme === 'dark' ? 'sun' : 'moon', settings.theme === 'dark' ? '밝은 테마' : '어두운 테마'],
+    ['screenshot', 'camera', '스크린샷 저장'],
+    ['fullscreen', 'fullscreen', '전체 화면'],
+  ].filter(([id]) => $(`#${id}-btn`));
+  openPopover(e.currentTarget, '<div class="pop-title">차트</div>' + items.map(([id, ic, label]) =>
+    `<div class="pop-item" data-value="${id}" role="menuitem">${icon(ic)}<span>${label}</span></div>`).join(''),
+  (id) => { $(`#${id}-btn`).click(); });
+});
+
+// 메뉴 화면: 설정, 거래소, 앱 설치, 정보(차트 라이브러리 출처)
+let installPrompt = null;
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (settings.tab === 'menu') renderMenu();
+});
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function renderMenu() {
+  const row = (label, value, attrs = '') => `<button class="menu-row" ${attrs}><span>${label}</span><span class="menu-value">${value}</span>${icon('chevron', 16)}</button>`;
+  $('#menu-screen').innerHTML = `
+    <header class="screen-head"><h1>메뉴</h1></header>
+    <div class="menu-group">
+      <h2>화면</h2>
+      <div class="menu-row static"><span>테마</span>
+        <span class="seg" role="group" aria-label="테마">${[['dark', '어둡게'], ['light', '밝게']].map(([id, label]) => `<button data-set-theme="${id}" class="${settings.theme === id ? 'active' : ''}">${label}</button>`).join('')}</span></div>
+      ${row('차트 설정', '색·격자·범례', 'data-menu="chart-settings"')}
+    </div>
+    <div class="menu-group">
+      <h2>시세</h2>
+      <label class="menu-row static" for="menu-source"><span>거래소</span>
+        <select id="menu-source" class="select">${FEEDS.filter((f) => f.id !== 'demo' || forceDemo).map((f) => `<option value="${f.id}" ${f.id === settings.source ? 'selected' : ''}>${f.name}</option>`).join('')}</select><span class="chev"></span></label>
+      <div class="menu-row static"><span>연결</span><span class="menu-value">${$('#feed-status').textContent}</span></div>
+      ${row('주식·환율 API 키', settings.keys.twelvedata ? '저장됨' : '없음', 'data-menu="key"')}
+    </div>
+    <div class="menu-group">
+      <h2>앱</h2>
+      ${standalone() ? '<div class="menu-row static"><span>앱으로 실행 중</span></div>' : row('홈 화면에 앱 설치', '', 'data-menu="install"')}
+      <p class="menu-note" id="install-help" hidden>
+        <b>아이폰</b>: Safari 아래쪽 공유 버튼(네모에 화살표) → <b>홈 화면에 추가</b><br>
+        <b>안드로이드</b>: Chrome 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
+    </div>
+    <div class="menu-group">
+      <h2>정보</h2>
+      <div class="menu-row static"><span>Rea Chart</span><span class="menu-value">${__BUILD_DATE__} 빌드</span></div>
+      <p class="menu-note credit">차트: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a><br>Copyright (c) 2025 TradingView, Inc.</p>
+    </div>`;
+}
+$('#menu-screen').addEventListener('click', async (e) => {
+  const theme = e.target.closest('[data-set-theme]');
+  if (theme && theme.dataset.setTheme !== settings.theme) { $('#theme-btn').click(); return renderMenu(); }
+  const item = e.target.closest('[data-menu]');
+  if (!item) return;
+  if (item.dataset.menu === 'chart-settings') openChartSettings();
+  if (item.dataset.menu === 'key') {
+    // 키 창은 지금 거래소 기준이라, Twelve Data로 바꾼 뒤 연다
+    if (!feed.needsKey) switchFeed('twelvedata');
+    openKeyDialog();
+  }
+  if (item.dataset.menu === 'install') {
+    if (installPrompt) {
+      installPrompt.prompt();
+      await installPrompt.userChoice.catch(() => {});
+      installPrompt = null;
+      renderMenu();
+    } else {
+      $('#install-help').hidden = false;
+    }
+  }
+});
+$('#menu-screen').addEventListener('change', (e) => {
+  if (e.target.id === 'menu-source') { switchFeed(e.target.value); renderMenu(); }
+});
+
+// 앱으로 설치했을 때 오프라인에서도 켜지도록 (웹 공유 한 장짜리 버전은 제외)
+if ('serviceWorker' in navigator && import.meta.env.PROD && !window.REA_FEED) {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+
 // ---------- 시작 ----------
+document.body.dataset.screen = settings.tab;
+for (const b of document.querySelectorAll('.tabbar [data-tab]')) b.classList.toggle('active', b.dataset.tab === settings.tab);
 applyToolsOpen();
 renderIntervals();
 renderRanges();
 renderChartTypeBtn();
 applyScale();
-setPanel(settings.panelOpen);
+applyPanels();
 drawings.magnet = settings.magnet;
 drawings.stay = !!settings.stayDrawing;
 renderTools();

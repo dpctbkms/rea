@@ -595,3 +595,187 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .eraser-cursor .chart, .eraser-cursor .chart * { cursor: cell !important; }
 /* 그리는 동안에는 범례가 터치·클릭을 가로채지 않게 (차트 어디를 끌어도 십자선이 움직이도록) */
 .chart-wrap.drawing .legend .study, .chart-wrap.drawing .legend-toggle, .chart-wrap.drawing .ind-actions { pointer-events: none; }
+
+/* ---------- 종목 로고 자리 (동그라미 + 첫 글자) ---------- */
+.coin-logo {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: hsl(var(--h, 220) 55% 45%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+#watch-list li .sym { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#watch-list li .sym .sym-text { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.sym-text b { overflow: hidden; text-overflow: ellipsis; }
+.sym-text small { display: none; color: var(--muted); font-size: 11px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.credit { margin: 0; padding: 0 20px 16px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.credit a { color: var(--muted); }
+
+/* ---------- 휴대폰 앱 화면 (트레이딩뷰 앱처럼) ---------- */
+.app-only, .tabbar, .menu-screen { display: none; }
+.sheet-backdrop { position: fixed; inset: 0; z-index: 29; background: rgb(0 0 0 / 0.45); }
+.interval-btn { font-weight: 600; gap: 4px; padding: 0 8px; }
+.topbar { height: calc(46px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+
+@media (max-width: 768px) {
+  .web-only { display: none !important; }
+  .app-only { display: revert; }
+  .btn.app-only, .interval-btn.app-only { display: inline-flex; }
+  .coin-logo.app-only { display: inline-grid; }
+  .topbar { gap: 2px; }
+  .topbar .divider { display: none; }
+  .symbol-btn { padding: 0 6px; gap: 6px; font-size: 15px; }
+  .statusbar { height: 40px; }
+  .statusbar .scale-btn, .ranges button { height: 30px; }
+  .clock, .statusbar .divider.small:not(.app-only) { display: none; }
+  .scale-btn.undo-btn, .scale-btn.redo-btn { display: grid; place-items: center; padding: 0 6px; }
+  .scale-btn:disabled { opacity: 0.35; }
+
+  /* 아래 탭 */
+  .tabbar {
+    display: flex;
+    flex: none;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 54px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 10.5px;
+    cursor: pointer;
+  }
+  .tabbar button.active { color: var(--text); font-weight: 600; }
+  .tab-icon { display: grid; place-items: center; height: 24px; }
+
+  /* 탭마다 보이는 것 */
+  body:not([data-screen='chart']) .topbar,
+  body:not([data-screen='chart']) .statusbar,
+  body:not([data-screen='chart']) .chart-wrap,
+  body:not([data-screen='chart']) .tools { display: none !important; }
+  body[data-screen='menu'] .layout > :not(.menu-screen) { display: none !important; }
+  body[data-screen='menu'] .menu-screen { display: flex; }
+
+  /* 관심 목록 화면 */
+  body[data-screen='watch'] .watchlist { display: flex; width: 100%; border: 0; }
+  .watch-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  #watch-title { flex: 1; font-size: 22px; font-weight: 700; }
+  .watch-head .select { color: var(--muted); font-size: 13px; padding: 0 6px; max-width: 45%; }
+  .watch-cols, .details { display: none; }
+  #watch-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'sym last' 'sym pct';
+    gap: 2px 12px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+  }
+  #watch-list li.active { background: transparent; }
+  #watch-list li .sym { grid-area: sym; gap: 12px; }
+  #watch-list li .coin-logo { width: 34px; height: 34px; font-size: 15px; }
+  .sym-text small { display: block; font-size: 12px; }
+  #watch-list li .last { grid-area: last; font-weight: 600; }
+  #watch-list li .chg { display: none; }
+  #watch-list li .pct { grid-area: pct; justify-self: end; font-size: 12px; padding: 1px 6px; border-radius: 4px; }
+  #watch-list li .pct.up { background: color-mix(in srgb, var(--up) 16%, transparent); }
+  #watch-list li .pct.down { background: color-mix(in srgb, var(--down) 16%, transparent); }
+
+  /* 메뉴 화면 */
+  .menu-screen { flex: 1; flex-direction: column; gap: 18px; overflow-y: auto; padding: 0 0 24px; }
+  .screen-head { padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--border); }
+  .screen-head h1 { margin: 0; font-size: 22px; }
+  .menu-group h2 { margin: 0 16px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+  .menu-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 50px;
+    padding: 0 12px 0 16px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .menu-group > :last-child { border-bottom: 1px solid var(--border); }
+  .menu-row > span:first-child { flex: 1; }
+  .menu-row.static { cursor: default; }
+  .menu-row svg { color: var(--muted); flex: none; }
+  .menu-value { color: var(--muted); font-size: 13px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-row .select { max-width: 60%; padding: 0 4px; color: var(--muted); font-size: 14px; text-align: right; text-align-last: right; }
+  .menu-row .select + .chev { margin-right: 6px; }
+  .menu-note { margin: 0; padding: 12px 16px; background: var(--panel); color: var(--muted); font-size: 13px; line-height: 1.6; border-top: 1px solid var(--border); }
+  .menu-note b { color: var(--text); font-weight: 600; }
+  .menu-note.credit { font-size: 12px; }
+  .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--hover); }
+  .seg button { height: 30px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .seg button.active { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); }
+
+  /* 아래에서 올라오는 시트 (타임프레임·차트 종류·⋯ 메뉴) */
+  .popover.sheet {
+    left: 0 !important;
+    right: 0;
+    top: auto !important;
+    bottom: 0;
+    max-height: 70dvh;
+    overflow-y: auto;
+    padding: 18px 0 calc(10px + env(safe-area-inset-bottom));
+    border: 0;
+    border-radius: 14px 14px 0 0;
+    animation: sheet-up 0.18s ease-out;
+  }
+  .popover.sheet::before {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+  .popover.sheet .pop-item { min-height: 48px; padding: 0 20px; font-size: 15px; }
+  .popover.sheet .pop-title { padding: 10px 20px 4px; font-size: 12px; }
+  .popover.sheet .star { display: none; } /* 휴대폰에는 즐겨찾기 줄이 없다 */
+
+  /* 대화 창도 아래에서 올라오는 시트로 */
+  dialog.search {
+    width: 100%;
+    max-width: 100%;
+    margin: auto 0 0;
+    border: 0;
+    border-radius: 14px 14px 0 0;
+    max-height: calc(100dvh - 24px);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-up 0.18s ease-out;
+  }
+  #search-dialog[open] { display: flex; flex-direction: column; height: calc(100dvh - 24px); }
+  #search-results { max-height: none; flex: 1; }
+  #search-results li { padding: 12px 16px; font-size: 15px; }
+}
+@keyframes sheet-up { from { transform: translateY(40%); } to { transform: none; } }

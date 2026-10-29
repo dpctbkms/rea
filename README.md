@@ -8,7 +8,10 @@
 
 ## 기능
 
-화면 구성과 조작 방식은 트레이딩뷰를 따랐습니다.
+화면 구성과 조작 방식은 트레이딩뷰를 따랐습니다. 컴퓨터에서는 트레이딩뷰 웹, 휴대폰에서는 트레이딩뷰 앱처럼 보입니다.
+
+- **휴대폰 앱 화면**: 아래 탭(관심 목록 · 차트 · 메뉴), 위 막대는 종목 · 타임프레임 하나 · 차트 종류 · 지표 · ⋯, 메뉴는 아래에서 올라오는 시트로 열립니다. 메뉴 탭에서 테마, 거래소, 차트 설정, 앱 설치, 정보를 봅니다.
+- **앱으로 설치**: 홈 화면에 추가하면 주소창 없이 앱처럼 열리고, 인터넷이 끊겨도 화면은 켜집니다 (시세는 연결되면 다시 받음). 아이폰은 Safari 공유 버튼 → 홈 화면에 추가, 안드로이드는 Chrome ⋮ → 앱 설치.
 
 - **위 툴바**: 종목 검색, 거래소, 즐겨찾기 타임프레임(▾ 목록에서 ★로 추가·제거), 차트 종류(바·캔들·속이 빈 캔들·하이킨아시·라인·영역·기준선), 지표, 실행 취소·다시 실행, 차트 설정, 전체 화면, 스크린샷, 테마
 - **왼쪽 그리기 도구** (트레이딩뷰와 같은 묶음, 오른쪽 아래 삼각형 또는 같은 버튼 한 번 더 → 펼침 메뉴)
@@ -43,6 +46,7 @@ npm install
 npm run dev        # http://localhost:5173
 npm run build      # dist/ 에 정적 파일 생성
 npm test           # 지표 계산 단위 테스트
+node scripts/make-icons.cjs  # public/icons/*.svg를 고친 뒤 앱 아이콘 PNG 다시 만들기 (Playwright 필요)
 npm run test:e2e   # 브라우저로 화면 동작 확인 (Playwright 필요)
 ```
 
@@ -69,8 +73,14 @@ npm run test:e2e   # 브라우저로 화면 동작 확인 (Playwright 필요)
 | `src/indicators.js` | SMA, EMA, 볼린저, RSI(Wilder), MACD, VWAP, 하이킨아시 계산 |
 | `test/` | 지표·피드 도우미 단위 테스트(`node --test`) |
 | `e2e/` | 브라우저 확인 스크립트(`npm run test:e2e`) |
+| `public/` | 앱 설치 파일: `manifest.webmanifest`, 오프라인용 `sw.js`, 아이콘(`icons/`) |
 | `docs/PROGRESS.md` | 작업 기록: 진행 중, 완료, 해야 할 일. 작업마다 갱신 |
 
 다른 거래소나 주식 데이터를 붙이려면 `src/feeds/`에 같은 인터페이스의 피드를 만들어 `src/feeds/index.js`의 `FEEDS`에 추가하면 됩니다.
 
 사이트에는 `noindex` 표시가 있어 검색엔진 결과에 나오지 않습니다.
+
+## 출처
+
+차트는 [TradingView Lightweight Charts™](https://www.tradingview.com/)로 그립니다 (Copyright (c) 2025 TradingView, Inc., Apache-2.0).
+라이선스 조건에 따라 차트 위 로고 대신 휴대폰 **메뉴 > 정보**와 **차트 설정** 창 아래에 이 출처와 링크를 표시합니다.
