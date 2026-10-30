@@ -110,8 +110,8 @@ function applyTheme() {
     },
     grid: { vertLines: { color: grid, visible: c.vertGrid }, horzLines: { color: grid, visible: c.horzGrid } },
     crosshair: {
-      vertLine: { labelBackgroundColor: '#363a45', visible: lines, labelVisible: settings.cursorMode !== 'arrow' },
-      horzLine: { labelBackgroundColor: '#363a45', visible: lines, labelVisible: settings.cursorMode !== 'arrow' },
+      vertLine: { labelBackgroundColor: '#3d3d3d', visible: lines, labelVisible: settings.cursorMode !== 'arrow' },
+      horzLine: { labelBackgroundColor: '#3d3d3d', visible: lines, labelVisible: settings.cursorMode !== 'arrow' },
     },
   });
   // 휴대폰 상단 상태 표시줄 색 (앱으로 설치했을 때)
@@ -1881,6 +1881,9 @@ setInterval(tick, 1000);
 // ---------- 오른쪽 클릭 메뉴 ----------
 chartEl.addEventListener('contextmenu', (e) => {
   e.preventDefault();
+  // 휴대폰에서 길게 누르면 안드로이드 브라우저가 오른쪽 클릭으로도 알린다. 트레이딩뷰 앱처럼 십자선만 띄운다
+  // (그 가격의 메뉴는 십자선 옆 + 버튼으로)
+  if (e.pointerType ? e.pointerType !== 'mouse' : usingTouch()) return;
   const pt = localPoint(e);
   const hit = drawings.tool === 'cursor' && drawings.hitTest(pt);
   if (hit) {
@@ -2184,14 +2187,15 @@ $('#watch-source').addEventListener('change', (e) => switchFeed(e.target.value))
 $('#more-btn').innerHTML = icon('more');
 $('#more-btn').addEventListener('click', (e) => {
   const items = [
+    ['reset', 'realtime', '차트 초기화'],
     ['settings', 'gear', '차트 설정'],
     ['theme', settings.theme === 'dark' ? 'sun' : 'moon', settings.theme === 'dark' ? '밝은 테마' : '어두운 테마'],
     ['screenshot', 'camera', '스크린샷 저장'],
     ['fullscreen', 'fullscreen', '전체 화면'],
-  ].filter(([id]) => $(`#${id}-btn`));
+  ].filter(([id]) => id === 'reset' || $(`#${id}-btn`));
   openPopover(e.currentTarget, '<div class="pop-title">차트</div>' + items.map(([id, ic, label]) =>
     `<div class="pop-item" data-value="${id}" role="menuitem">${icon(ic)}<span>${label}</span></div>`).join(''),
-  (id) => { $(`#${id}-btn`).click(); });
+  (id) => (id === 'reset' ? resetChart() : $(`#${id}-btn`).click()));
 });
 
 // 메뉴 화면: 설정, 거래소, 앱 설치, 정보(차트 라이브러리 출처)
@@ -2289,6 +2293,9 @@ for (const d of document.querySelectorAll('dialog.search')) {
   d.prepend(sheetGrip(d, () => d.close()));
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
+document.addEventListener('contextmenu', (e) => {
+  if (usingTouch() && !e.target.closest('input, textarea')) e.preventDefault();
+});
 // 아이폰 Safari는 확대 금지 설정을 무시해서, 두 손가락 확대 동작을 직접 막는다 (차트 확대는 차트가 따로 처리)
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 // 휴대폰 가로: 아래 탭이 왼쪽 세로 막대로 바뀐다 (모든 화면을 가로로 쓸 수 있게). 크기가 바뀌니 위치를 다시 잡는다

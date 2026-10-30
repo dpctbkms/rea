@@ -20,7 +20,11 @@ const { chromium, devices } = require('playwright');
 
   // 길게 눌러 십자선 -> + 버튼
   await touch('touchStart', 150, 300); await m.waitForTimeout(500); await touch('touchEnd'); await m.waitForTimeout(300);
-  console.log('long press shows +:', await m.isVisible('#price-plus'));
+  console.log('long press shows +:', await m.isVisible('#price-plus'), '| no chart menu on long press', !(await m.isVisible('#popover')));
+  // 안드로이드는 길게 누르면 오른쪽 클릭(contextmenu)도 보낸다: 손가락에서 온 것은 메뉴를 띄우지 않는다
+  await m.evaluate(() => document.querySelector('#chart canvas').dispatchEvent(new PointerEvent('contextmenu', { bubbles: true, cancelable: true, pointerType: 'touch', clientX: 150, clientY: 300 })));
+  await m.waitForTimeout(200);
+  console.log('touch contextmenu ignored:', !(await m.isVisible('#popover')));
   await m.tap('#price-plus');
   await m.waitForTimeout(250);
   console.log('+ sheet:', await m.$eval('#popover', (e) => e.classList.contains('sheet')), '|', await m.$$eval('#popover .pop-item', (e) => e.map((x) => x.textContent.trim().replace(/[\d,.]+/, '#')).join(' / ')));

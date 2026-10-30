@@ -64,7 +64,7 @@ const ANGLE_SNAP = ['trend', 'ray', 'channel', 'fib', 'fibext', 'measure', 'arro
 const SQUARE_SNAP = ['rect', 'ellipse'];
 // 휴대폰 떠 있는 막대의 45° 버튼을 보여 줄 도형 (Shift 대신)
 export const canAngleLock = (type) => ANGLE_SNAP.includes(type);
-const CROSSHAIR_LABEL = '#4c525e';
+const CROSSHAIR_LABEL = '#4a4a4a';
 // 손가락으로 도형을 누를 때 인정하는 거리 (px). 마우스는 7
 export const TOUCH_HIT = 16;
 // 이만큼 움직여야 도형을 옮기기 시작한다 (누르다 손이 살짝 떨려도 도형이 밀리지 않게)
@@ -133,7 +133,7 @@ export class DrawingManager {
     this.lastTouchCursor = null; // 다음 도구를 고르면 십자선이 다시 나타날 자리
     this.angleLock = false; // 45° 고정 (휴대폰 떠 있는 막대의 버튼, Shift와 같음)
     this.touchUI = false; // 손가락으로 쓰는 중이면 손잡이를 크게 그린다
-    this.handleFill = '#131722'; // 손잡이 안쪽 색 (차트 배경)
+    this.handleFill = '#0f0f0f'; // 손잡이 안쪽 색 (차트 배경)
     this.drag = null;
     this.clipboard = null;
     this.undoStack = [];
@@ -1050,7 +1050,7 @@ export class DrawingManager {
         const off = (y) => (y < a.y ? y - 16 : y + 16);
         label(`목표: ${this.formatPrice(target.price)} (${pct(gain)})`, cx, off(b.y), 'center', '#089981');
         label(`손절: ${this.formatPrice(stop.price)} (${pct(loss)})`, cx, off(c.y), 'center', '#f23645');
-        label(`${d.type === 'long' ? '롱' : '숏'} ${this.formatPrice(entry.price)} · 손익비 ${rr.toFixed(2)}`, cx, a.y, 'center', '#363a45');
+        label(`${d.type === 'long' ? '롱' : '숏'} ${this.formatPrice(entry.price)} · 손익비 ${rr.toFixed(2)}`, cx, a.y, 'center', '#3d3d3d');
         break;
       }
       case 'measure': case 'daterange': case 'pricerange': {
