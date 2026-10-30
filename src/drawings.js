@@ -845,19 +845,11 @@ export class DrawingManager {
     return px ? { pt, px } : null;
   }
 
+  // 트레이딩뷰처럼 점선 십자선만 (가운데 동그라미 없음). 점은 두 선이 만나는 곳에 찍힌다.
   #touchCursor(ctx, size) {
-    const { x, y } = this.#touchCursorPoint()?.px ?? this.touchCursor;
-    this.#crossLines(ctx, size, { x, y });
-    ctx.save();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#2962ff';
-    ctx.fillStyle = 'rgba(41, 98, 255, 0.15)';
-    ctx.beginPath();
-    ctx.arc(x, y, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    this.#crossLines(ctx, size, this.#touchCursorPoint()?.px ?? this.touchCursor);
   }
+
 
   #shape(ctx, d, px, size) {
     const [a, b, c] = px;

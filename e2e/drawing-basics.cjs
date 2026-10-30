@@ -39,7 +39,8 @@ const { chromium, devices } = require('playwright');
   await p.click('#draw-bar [data-action=color]'); await p.click('#popover [data-value="#e91e63"]');
   d = await D();
   console.log('styled:', d[0].width, d[0].lineStyle, d[0].color);
-  // 4) 더블클릭 → 설정 창: 오른쪽 연장
+  // 4) 더블클릭 → 설정 창: 오른쪽 연장 (앞의 클릭과 이어져 더블클릭으로 잡히지 않게 잠깐 쉰다)
+  await p.waitForTimeout(400);
   await p.mouse.click(...A(325, 325)); await p.mouse.click(...A(325, 325));
   await p.waitForTimeout(200);
   console.log('settings open:', await p.$eval('#drawing-settings', (e) => e.open), await p.textContent('#drawing-settings-title'));

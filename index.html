@@ -57,6 +57,9 @@
         <div id="interval-input" class="interval-input" hidden></div>
         <textarea id="text-editor" class="text-editor" rows="1" spellcheck="false" aria-label="텍스트 입력" hidden></textarea>
         <div id="chart" class="chart"></div>
+        <!-- 트레이딩뷰처럼: 십자선 높이의 + (이 가격에 알림·수평선), 지난 봉을 보고 있을 때 최신 봉으로 -->
+        <button id="price-plus" class="price-plus" hidden aria-label="이 가격에 알림·수평선" title="이 가격에 알림·수평선"></button>
+        <button id="to-realtime" class="to-realtime" hidden aria-label="최신 봉으로 이동" title="최신 봉으로 이동"></button>
         <div id="loading" class="loading" hidden>불러오는 중…</div>
       </section>
 
@@ -98,6 +101,7 @@
       <button data-tab="menu"><span class="tab-icon"></span><span>메뉴</span></button>
     </nav>
     <div id="sheet-backdrop" class="sheet-backdrop" hidden></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
     <div id="popover" class="popover" role="menu" hidden></div>
 

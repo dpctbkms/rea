@@ -85,13 +85,14 @@ let unsubscribeTickers = () => {};
 let loadId = 0;
 
 // ---------- 차트 ----------
+const RIGHT_OFFSET = 8; // 마지막 봉 오른쪽 빈 칸 (봉 수)
 document.documentElement.dataset.theme = settings.theme;
 const chart = createChart($('#chart'), {
   autoSize: true,
   // 차트 라이브러리 출처 표시는 차트 위 로고 대신 메뉴 > 정보와 차트 설정 창 아래에 둔다 (라이선스 조건)
   layout: { attributionLogo: false },
   crosshair: { mode: CrosshairMode.Normal },
-  timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 8, borderVisible: false },
+  timeScale: { timeVisible: true, secondsVisible: false, rightOffset: RIGHT_OFFSET, borderVisible: false },
   rightPriceScale: { borderVisible: false },
   localization: { locale: 'ko-KR' },
 });
@@ -175,6 +176,8 @@ function createMainSeries() {
   mainSeries.attachPrimitive(countdown);
   drawings.handleFill = c.bgColor || css('--bg'); // 손잡이 안쪽은 차트 배경색
   drawings.attach(mainSeries);
+  alertLines = [];
+  drawAlertLines();
 }
 
 // 차트 종류에 맞게 봉 데이터를 변환.
@@ -296,6 +299,7 @@ async function loadSymbol() {
   }
   if (id !== loadId) return;
   setMainData();
+  drawAlertLines();
   drawings.load(settings.drawings[lineKey()]);
   renderTools();
   refreshIndicators();
@@ -320,6 +324,7 @@ function onBar(bar) {
   mainSeries.update(data[data.length - 1]);
   refreshIndicators(true);
   updateLegend();
+  checkAlerts(settings.coin, bar.close);
   detailsRender ||= requestAnimationFrame(() => { detailsRender = 0; renderDetails(); });
 }
 let detailsRender = 0;
@@ -485,6 +490,8 @@ const ICONS = {
   sun: '<circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4"/>',
   moon: '<path d="M16 12.5A7 7 0 017.5 4 7 7 0 1016 12.5z"/>',
   plus: '<path d="M10 4v12M4 10h12"/>',
+  bell: '<path d="M6 8a4 4 0 018 0c0 4.5 2 5.5 2 5.5H4S6 12.5 6 8z"/><path d="M8.5 16a1.6 1.6 0 003 0"/>',
+  realtime: '<path d="M5 6l4 4-4 4M10 6l4 4-4 4"/>',
   x: '<path d="M5 5l10 10M15 5L5 15"/>',
   search: '<circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/>',
   list: '<path d="M7 5h10M7 10h10M7 15h10"/><circle cx="3.5" cy="5" r=".9" fill="currentColor"/><circle cx="3.5" cy="10" r=".9" fill="currentColor"/><circle cx="3.5" cy="15" r=".9" fill="currentColor"/>',
@@ -1742,6 +1749,7 @@ function startTickers() {
   if (!coins.length) return;
   unsubscribeTickers = feed.subscribeTickers(coins, (t) => {
     tickers.set(t.coin, t);
+    checkAlerts(t.coin, t.price);
     // 틱마다 다시 그리지 않고 프레임당 한 번만.
     watchRender ||= requestAnimationFrame(() => { watchRender = 0; renderWatchlist(); if (t.coin === settings.coin) renderDetails(); });
   });
@@ -1775,7 +1783,8 @@ function renderDetails() {
       <div class="d-bar"><span style="left:${pos}%"></span></div>
       <div class="d-ends"><span>${fmt(lo, digits)}</span><span>${fmt(hi, digits)}</span></div>
     </div>
-    <div class="d-stat"><span>거래량 (${stepSeconds() >= 86400 ? '이번 봉' : '24시간'})</span><span>${fmtVol(vol)}</span></div>`;
+    <div class="d-stat"><span>거래량 (${stepSeconds() >= 86400 ? '이번 봉' : '24시간'})</span><span>${fmtVol(vol)}</span></div>
+    ${alertListHtml(alertsHere(), false)}`;
 }
 
 function setPanel(open) {
@@ -1898,7 +1907,7 @@ chartEl.addEventListener('contextmenu', (e) => {
   const digits = bars.length ? priceFormatFor(bars[bars.length - 1].close).precision : 2;
   const items = [
     ['reset', '차트 초기화', 'Alt+R'],
-    ...(price != null ? [['hline', `${fmt(price, digits)}에 수평선 그리기`, 'Alt+H']] : []),
+    ...(price != null ? [['alert', `${fmt(price, digits)}에 알림 추가`, ''], ['hline', `${fmt(price, digits)}에 수평선 그리기`, 'Alt+H']] : []),
     ['sep'],
     ...(drawings.clipboard ? [['paste', '붙여넣기', shortcut('V')]] : []),
     ['clear-drawings', '이 종목 그림 모두 지우기', ''],
@@ -1910,6 +1919,7 @@ chartEl.addEventListener('contextmenu', (e) => {
     : `<div class="pop-item" data-value="${v}" role="menuitem"><span>${label}</span><span class="fly-key">${key}</span></div>`)).join(''), (v) => {
     if (v === 'reset') resetChart();
     if (v === 'hline') { pickTool('lines', 'hline'); drawings.handleClick(pt); }
+    if (v === 'alert') addAlert(price);
     if (v === 'paste') drawings.paste();
     if (v === 'clear-drawings') drawings.clear();
     if (v === 'clear-studies') { settings.indicators = []; saveStudies(); }
@@ -1980,6 +1990,165 @@ document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('#legend .study')) for (const r of $('#legend').querySelectorAll('.study.open')) r.classList.remove('open');
 }, true);
 
+// ---------- 알림 문구 (화면 위에 잠깐) ----------
+let toastTimer = 0;
+function toast(text, ms = 3500) {
+  const el = $('#toast');
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+$('#toast').addEventListener('click', () => { $('#toast').hidden = true; });
+
+// ---------- 가격 알림 (트레이딩뷰의 알림처럼, 앱이 열려 있는 동안 확인) ----------
+settings.alerts ??= [];
+let alertLines = [];
+const fmtPrice = (p) => fmt(p, priceFormatFor(p).precision);
+const alertsHere = () => settings.alerts.filter((a) => a.feed === feed.id && a.coin === settings.coin);
+
+// 차트 위 주황 점선 + 가격 눈금 표시
+function drawAlertLines() {
+  if (!mainSeries) return;
+  for (const line of alertLines) { try { mainSeries.removePriceLine(line); } catch { /* 이미 지운 선 */ } }
+  alertLines = alertsHere().filter((a) => !a.done).map((a) => mainSeries.createPriceLine({
+    price: a.price, color: '#ff9800', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '알림',
+  }));
+}
+
+function addAlert(price) {
+  if (price == null || !Number.isFinite(price)) return;
+  const last = bars.at(-1)?.close;
+  const dir = last != null && price < last ? 'down' : 'up';
+  settings.alerts.push({ id: Math.random().toString(36).slice(2, 10), feed: feed.id, coin: settings.coin, label: marketLabel(), price, dir, at: Date.now() });
+  save();
+  alertsChanged();
+  toast(`${marketLabel()}이(가) ${fmtPrice(price)} ${dir === 'up' ? '이상' : '이하'}이 되면 알려 드립니다`);
+  // 휴대폰 알림 허락 (앱으로 설치했을 때 화면을 꺼도 알림이 뜨게)
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+}
+
+function removeAlert(id) {
+  settings.alerts = settings.alerts.filter((a) => a.id !== id && (id !== 'done' || !a.done));
+  save();
+  alertsChanged();
+}
+
+function alertsChanged() {
+  drawAlertLines();
+  renderDetails();
+  if (settings.tab === 'menu') renderMenu();
+}
+
+function checkAlerts(coin, price) {
+  let fired = false;
+  for (const a of settings.alerts) {
+    if (a.done || a.feed !== feed.id || a.coin !== coin) continue;
+    if (a.dir === 'up' ? price < a.price : price > a.price) continue;
+    a.done = Date.now();
+    fired = true;
+    const msg = `${a.label} ${fmtPrice(a.price)} ${a.dir === 'up' ? '돌파' : '이탈'} (지금 ${fmtPrice(price)})`;
+    toast(`🔔 ${msg}`, 8000);
+    navigator.vibrate?.([120, 60, 120]);
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const opts = { body: msg, icon: 'icons/icon-192.png', tag: a.id };
+      // 안드로이드는 서비스 워커로만 알림을 띄울 수 있다
+      (navigator.serviceWorker?.getRegistration() ?? Promise.resolve(null))
+        .then((reg) => (reg ? reg.showNotification('가격 알림', opts) : new Notification('가격 알림', opts)))
+        .catch(() => {});
+    }
+  }
+  if (fired) { save(); alertsChanged(); }
+}
+
+function alertListHtml(list, withSymbol) {
+  if (!list.length) return '';
+  const rows = list.map((a) => `<div class="alert-row ${a.done ? 'done' : ''}">
+    <span class="alert-bell">${icon('bell', 15)}</span>
+    <span class="alert-text">${withSymbol ? `<b>${a.label}</b> ` : ''}${fmtPrice(a.price)} ${a.dir === 'up' ? '이상' : '이하'}${a.done ? ' · 울림' : ''}</span>
+    <button class="alert-del" data-alert-del="${a.id}" aria-label="알림 지우기" title="알림 지우기">${icon('x', 14)}</button></div>`).join('');
+  const doneCount = list.filter((a) => a.done).length;
+  return `<div class="alerts">${withSymbol ? '' : '<div class="d-label">가격 알림</div>'}${rows}${doneCount ? '<button class="link alert-clear" data-alert-del="done">울린 알림 지우기</button>' : ''}</div>`;
+}
+document.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-alert-del]');
+  if (del) removeAlert(del.dataset.alertDel);
+});
+
+// ---------- 십자선 높이의 + 버튼 (트레이딩뷰처럼: 이 가격에 알림 · 수평선 · 가격 복사) ----------
+const plusBtn = $('#price-plus');
+plusBtn.innerHTML = icon('plus', 14);
+let plusPrice = null;
+let plusPoint = null;
+let plusHover = false;
+let plusHide = 0;
+function placePlus() {
+  const pt = crosshairPoint;
+  const ok = pt && drawings.tool === 'cursor' && pt.y <= chart.panes()[0].getHeight() && mainSeries;
+  if (!ok) {
+    // 마우스가 + 로 옮겨 가는 사이 십자선이 잠깐 사라지므로 바로 숨기지 않는다
+    clearTimeout(plusHide);
+    plusHide = setTimeout(() => { if (!plusHover && popoverAnchor !== plusBtn) plusBtn.hidden = true; }, 180);
+    return;
+  }
+  clearTimeout(plusHide);
+  plusPrice = mainSeries.coordinateToPrice(pt.y);
+  plusPoint = pt;
+  plusBtn.hidden = plusPrice == null;
+  plusBtn.style.top = `${pt.y}px`;
+  plusBtn.style.left = `${chart.timeScale().width()}px`;
+}
+chart.subscribeCrosshairMove(() => placePlus());
+plusBtn.addEventListener('mouseenter', () => { plusHover = true; });
+plusBtn.addEventListener('mouseleave', () => { plusHover = false; placePlus(); });
+plusBtn.addEventListener('click', () => {
+  const price = plusPrice, pt = plusPoint;
+  if (price == null) return;
+  const text = fmtPrice(price);
+  const items = [['alert', 'bell', `${text}에 알림 추가`], ['hline', 'hline', `${text}에 수평선 그리기`], ['copy', 'copy', `${text} 복사`]];
+  openPopover(plusBtn, `<div class="pop-title">${marketLabel()} · ${text}</div>` + items.map(([v, ic, label]) =>
+    `<div class="pop-item" data-value="${v}" role="menuitem">${icon(ic)}<span>${label}</span></div>`).join(''), (v) => {
+    if (v === 'alert') addAlert(price);
+    if (v === 'hline') {
+      pickTool('lines', 'hline');
+      drawings.setTouchCursor(null);
+      drawings.handleClick({ x: Math.min(pt.x, chart.timeScale().width() - 1), y: pt.y });
+    }
+    if (v === 'copy') navigator.clipboard?.writeText(String(+price.toFixed(priceFormatFor(price).precision))).then(() => toast(`${text} 복사함`), () => {});
+    plusBtn.hidden = true;
+  });
+});
+
+// ---------- 지난 봉을 보고 있으면 오른쪽 아래에 "최신 봉으로" 버튼 ----------
+const rtBtn = $('#to-realtime');
+rtBtn.innerHTML = icon('realtime', 16);
+function placeRealtime() {
+  const r = chart.timeScale().getVisibleLogicalRange();
+  rtBtn.hidden = !r || !bars.length || r.to >= bars.length - 1;
+  if (rtBtn.hidden) return;
+  rtBtn.style.right = `${chart.priceScale('right').width() + 10}px`;
+  rtBtn.style.bottom = `${chart.timeScale().height() + 10}px`;
+}
+chart.timeScale().subscribeVisibleLogicalRangeChange(() => placeRealtime());
+// 라이브러리의 scrollToRealTime 애니메이션은 멀리서 부르면 끝까지 가지 못할 때가 있어 직접 옮긴다
+function scrollToLatest() {
+  const ts = chart.timeScale();
+  ts.scrollToPosition(ts.scrollPosition(), false); // 손가락으로 튕긴 관성 멈추기
+  const r = ts.getVisibleLogicalRange();
+  if (!r || !bars.length) return;
+  const width = r.to - r.from;
+  const from0 = r.from, from1 = bars.length - 1 + RIGHT_OFFSET - width;
+  const t0 = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / 350);
+    const from = from0 + (from1 - from0) * (1 - (1 - k) ** 3);
+    ts.setVisibleLogicalRange({ from, to: from + width });
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+rtBtn.addEventListener('click', scrollToLatest);
+
 // ---------- 휴대폰 앱 화면 (트레이딩뷰 앱처럼 아래 탭: 관심 목록 · 차트 · 메뉴) ----------
 function setTab(tab) {
   settings.tab = tab;
@@ -2042,6 +2211,10 @@ function renderMenu() {
       <div class="menu-row static"><span>테마</span>
         <span class="seg" role="group" aria-label="테마">${[['dark', '어둡게'], ['light', '밝게']].map(([id, label]) => `<button data-set-theme="${id}" class="${settings.theme === id ? 'active' : ''}">${label}</button>`).join('')}</span></div>
       ${row('차트 설정', '색·격자·범례', 'data-menu="chart-settings"')}
+    </div>
+    <div class="menu-group">
+      <h2>가격 알림</h2>
+      ${alertListHtml(settings.alerts, true) || '<p class="menu-note">차트를 길게 눌러 나오는 + 를 누르면 그 가격에 알림을 걸 수 있습니다.</p>'}
     </div>
     <div class="menu-group">
       <h2>시세</h2>
@@ -2118,10 +2291,8 @@ for (const d of document.querySelectorAll('dialog.search')) {
 }
 // 아이폰 Safari는 확대 금지 설정을 무시해서, 두 손가락 확대 동작을 직접 막는다 (차트 확대는 차트가 따로 처리)
 document.addEventListener('gesturestart', (e) => e.preventDefault());
-// 휴대폰 가로: 차트 화면으로
-const applyLandscape = () => { if (landscapeMedia.matches && settings.tab !== 'chart') setTab('chart'); };
-landscapeMedia.addEventListener('change', applyLandscape);
-applyLandscape();
+// 휴대폰 가로: 아래 탭이 왼쪽 세로 막대로 바뀐다 (모든 화면을 가로로 쓸 수 있게). 크기가 바뀌니 위치를 다시 잡는다
+landscapeMedia.addEventListener('change', () => { closePopover(); placePlus(); placeRealtime(); });
 
 // 브라우저 확인 스크립트(e2e)에서 상태를 읽는 통로
 window.__rea = { drawings, chart };

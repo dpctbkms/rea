@@ -73,15 +73,18 @@ const { chromium, devices } = require('playwright');
   console.log('search sheet closed by dragging:', !(await m.isVisible('#search-dialog')));
   await ctx.close();
 
-  // 가로 화면: 아래 탭 없이 차트
+  // 가로 화면: 탭이 왼쪽 세로 막대로, 고른 화면(관심 목록)은 그대로
   const land = await b.newContext({ ...devices['iPhone 13 landscape'] });
   const l = await land.newPage();
   l.on('pageerror', (e) => errs.push('landscape ' + e.message));
   await l.addInitScript(() => localStorage.setItem('rea-chart-settings', JSON.stringify({ tab: 'watch' })));
   await l.goto(BASE + '/?feed=demo');
   await l.waitForTimeout(1500);
-  console.log('landscape: tabbar hidden', !(await l.isVisible('.tabbar')), '| chart shown', await l.isVisible('#chart'), '| app header', await l.isVisible('#interval-btn'),
-    '| chart height', Math.round((await l.locator('#chart').boundingBox()).height));
+  const rail = await l.locator('.tabbar').boundingBox();
+  console.log('landscape: tab rail on left', !!rail && rail.x < 5 && rail.height > rail.width, '| watchlist kept', await l.isVisible('#watch-list'));
+  await l.tap('.tabbar [data-tab=chart]');
+  await l.waitForTimeout(400);
+  console.log('landscape chart: shown', await l.isVisible('#chart'), '| app header', await l.isVisible('#interval-btn'), '| chart height', Math.round((await l.locator('#chart').boundingBox()).height));
   await l.screenshot({ path: OUT + '/ux-landscape.png' });
   await land.close();
 

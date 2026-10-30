@@ -846,10 +846,88 @@ button, select, .tabbar, .statusbar, .topbar, .menu-row { touch-action: manipula
   .tabbar button:active .tab-icon { transform: scale(0.9); }
 }
 
-/* 휴대폰을 가로로 돌리면 트레이딩뷰 앱처럼 차트만 크게 (아래 탭 숨김) */
+/* 휴대폰 가로: 아래 탭을 왼쪽 세로 막대로 옮겨 세로 공간은 차트에 (모든 화면을 가로로 쓸 수 있게) */
 @media (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
-  .tabbar { display: none !important; }
-  .topbar { height: calc(40px + env(safe-area-inset-top)); }
-  .statusbar { height: 34px; }
-  .layout { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  body { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .topbar { grid-column: 2; grid-row: 1; height: 42px; padding-top: 0; padding-right: env(safe-area-inset-right); }
+  .layout { grid-column: 2; grid-row: 2; padding-right: env(safe-area-inset-right); }
+  .statusbar { grid-column: 2; grid-row: 3; height: 34px; padding-bottom: 0; padding-right: env(safe-area-inset-right); }
+  .tabbar {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    width: calc(64px + env(safe-area-inset-left));
+    padding: 0 0 0 env(safe-area-inset-left);
+    border-top: 0;
+    border-right: 1px solid var(--border);
+  }
+  .tabbar button { flex: none; height: 58px; }
+  .watch-head, .screen-head { padding-top: 10px; }
 }
+
+/* 십자선 높이의 + 버튼 (트레이딩뷰처럼 가격 눈금 바로 왼쪽) */
+.price-plus {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+}
+.price-plus:hover { background: var(--hover); }
+@media (pointer: coarse) { .price-plus { width: 30px; height: 30px; margin: -15px 0 0 -34px; border-radius: 6px; } }
+/* 최신 봉으로 (오른쪽 아래 동그란 버튼) */
+.to-realtime {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);
+}
+.to-realtime:hover { background: var(--hover); }
+/* 화면 위에 잠깐 뜨는 알림 문구 */
+.toast {
+  position: fixed;
+  z-index: 50;
+  top: calc(56px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(440px, calc(100vw - 24px));
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 92%, transparent);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+  animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in { from { transform: translate(-50%, -8px); opacity: 0; } }
+/* 가격 알림 목록 (오른쪽 종목 정보, 휴대폰 메뉴) */
+.alerts { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.alert-row { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.alert-bell { display: grid; color: #ff9800; }
+.alert-row.done .alert-bell, .alert-row.done .alert-text { color: var(--muted); }
+.alert-text { flex: 1; }
+.alert-del { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.alert-del:hover { background: var(--hover); color: var(--text); }
+.alert-clear { align-self: flex-start; margin-top: 4px; font-size: 12px; }
+.menu-group .alerts { margin: 0; padding: 4px 8px 8px 16px; background: var(--panel); border-top: 1px solid var(--border); }
